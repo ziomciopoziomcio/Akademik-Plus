@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"akademik/internal/services"
-	"encoding/json"
 	"net/http"
 )
 
@@ -17,11 +16,8 @@ func NewStatystykiHandler(svc *services.StatystykiService) *StatystykiHandler {
 func (h *StatystykiHandler) GetDashboardStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.svc.GetStats()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "nie udalo sie pobrac statystyk")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writeJSON(w, http.StatusOK, stats)
 }

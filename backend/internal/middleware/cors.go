@@ -11,9 +11,15 @@ func isAllowedOrigin(origin string) bool {
 		return false
 	}
 
-	allowedOrigins := strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",")
+	normalizedOrigin := strings.TrimSuffix(strings.TrimSpace(origin), "/")
+	originsEnv := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if originsEnv == "" {
+		originsEnv = "http://localhost:5173,http://127.0.0.1:5173"
+	}
+
+	allowedOrigins := strings.Split(originsEnv, ",")
 	for _, allowedOrigin := range allowedOrigins {
-		if strings.TrimSpace(allowedOrigin) == origin {
+		if strings.TrimSuffix(strings.TrimSpace(allowedOrigin), "/") == normalizedOrigin {
 			return true
 		}
 	}

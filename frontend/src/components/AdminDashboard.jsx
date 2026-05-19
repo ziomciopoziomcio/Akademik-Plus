@@ -1,118 +1,130 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { useNavigate } from 'react-router-dom';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     PieChart, Pie, Cell,
-    BarChart, Bar
+    BarChart, Bar,
 } from 'recharts';
 import './AdminDashboard.css';
 import { apiFetch, readJsonOrText, clearAuthToken } from '../api';
 
-const fallbackAdminName = 'Administratorze';
+const COLORS = {
+    free: '#1b6392',
+    pending: '#e87823',
+    occupied: '#1b6e2d',
+};
 
-const fallbackLineData = [
-    { name: 'sty', free: 5, pending: 10, occupied: 85 },
-    { name: 'lut', free: 2, pending: 8, occupied: 90 },
-    { name: 'mar', free: 0, pending: 5, occupied: 95 },
-    { name: 'kwi', free: 0, pending: 5, occupied: 95 },
-    { name: 'maj', free: 0, pending: 5, occupied: 95 },
-    { name: 'cze', free: 0, pending: 5, occupied: 95 },
-    { name: 'lip', free: 20, pending: 0, occupied: 80 },
-    { name: 'sie', free: 30, pending: 0, occupied: 70 },
-    { name: 'wrz', free: 30, pending: 0, occupied: 70 },
-    { name: 'paź', free: 0, pending: 20, occupied: 80 },
-    { name: 'lis', free: 0, pending: 20, occupied: 80 },
-    { name: 'gru', free: 0, pending: 20, occupied: 80 },
-];
-
-const fallbackPieData = [
-    { name: 'Wolne', value: 2, color: '#1b6392' },
-    { name: 'Oczekujące', value: 10, color: '#e87823' },
-    { name: 'Zajęte', value: 88, color: '#1b6e2d' },
-];
-
-const fallbackBarData = [
-    { name: '1-osobowe', usage: 20 },
-    { name: '2-osobowe', usage: 70 },
-    { name: '3-osobowe', usage: 10 },
-];
-
-const fallbackFaults = [
-    { id: 1, desc: 'Pokój 204 - popsuty kran' },
-    { id: 2, desc: 'Pokój 20 - zatkana toaleta' },
-    { id: 3, desc: 'Pokój 47 - nieszczelne okno' },
-    { id: 4, desc: 'Pokój 90 - wypalona żarówka' },
-    { id: 5, desc: 'Pokój 77 - popsuty kran' },
-    { id: 6, desc: 'Pokój 56 - gniazdko nie działa' },
-];
-
-const fallbackDebtors = [
-    { id: 1, name: 'Jan Kowalski', room: '101', amount: 700 },
-    { id: 2, name: 'Anna Nowak', room: '204', amount: 200 },
-    { id: 3, name: 'Piotr Wiśniewski', room: '30', amount: 100 },
-];
-
-// Funkcja pomocnicza do usuwania polskich znaków z PDF
 const removePolishChars = (text) => {
     if (!text) return '';
     const charMap = {
         'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
-        'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'
+        'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z',
     };
-    return text.replace(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, match => charMap[match]);
+    return text.replace(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, (match) => charMap[match]);
+};
+
+const normalizeStats = (raw) => ({
+    wszystkie_pokoje: Number(raw?.wszystkie_pokoje ?? raw?.wszystkiePokoje ?? 0),
+    zajete_pokoje: Number(raw?.zajete_pokoje ?? raw?.zajetePokoje ?? 0),
+    nieoplacone_rachunki: Number(raw?.nieoplacone_rachunki ?? raw?.nieoplaconeRachunki ?? 0),
+    otwarte_usterki: Number(raw?.otwarte_usterki ?? raw?.otwarteUsterki ?? 0),
+});
+
+const faultDescription = (fault) => {
+    const room = fault?.pokoj_id ? `Pokój ${fault.pokoj_id}` : 'Pokój nieznany';
+    const desc = fault?.opis_usterki || 'Brak opisu';
+    const status = fault?.status || 'Brak statusu';
+    return `${room} - ${desc} (${status})`;
 };
 
 const AdminDashboard = () => {
     const navigate = useNavigate();
 
-    // Stany UI
+    const [adminName, setAdminName] = useState('Administratorze');
+    const [stats, setStats] = useState(normalizeStats());
+    const [faults, setFaults] = useState([]);
     const [selectedFault, setSelectedFault] = useState(null);
     const [activeModal, setActiveModal] = useState(null);
 
-    // Stany dat do raportu PDF
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const [statusToSet, setStatusToSet] = useState('Naprawiono');
 
-    // Dane administracyjne z backendu
-    const [adminName, setAdminName] = useState(fallbackAdminName);
-    const [lineData, setLineData] = useState(fallbackLineData);
-    const [pieData, setPieData] = useState(fallbackPieData);
-    const [barData, setBarData] = useState(fallbackBarData);
-    const [faults, setFaults] = useState(fallbackFaults);
-    const [debtors, setDebtors] = useState(fallbackDebtors);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
 
-    // Dynamiczne obliczanie sumy długów
-    const totalDebt = useMemo(() => debtors.reduce((sum, debtor) => sum + debtor.amount, 0), [debtors]);
+    const totalDebt = stats.nieoplacone_rachunki;
+
+    const lineData = useMemo(() => {
+        const total = Math.max(stats.wszystkie_pokoje, 1);
+        const occupied = Math.round((stats.zajete_pokoje / total) * 100);
+        const pending = Math.round((stats.otwarte_usterki / total) * 100);
+        const free = Math.max(0, 100 - occupied - pending);
+        return [{ name: 'teraz', free, pending, occupied }];
+    }, [stats]);
+
+    const pieData = useMemo(() => {
+        const total = Math.max(stats.wszystkie_pokoje, 0);
+        const occupied = Math.min(stats.zajete_pokoje, total);
+        const free = Math.max(0, total - occupied);
+        return [
+            { name: 'Wolne', value: free, color: COLORS.free },
+            { name: 'Zajęte', value: occupied, color: COLORS.occupied },
+        ];
+    }, [stats]);
+
+    const barData = useMemo(() => {
+        const total = Math.max(stats.wszystkie_pokoje, 1);
+        return [
+            { name: 'Pokoje zajęte', usage: Math.round((stats.zajete_pokoje / total) * 100) },
+            { name: 'Pokoje wolne', usage: Math.round(((total - stats.zajete_pokoje) / total) * 100) },
+        ];
+    }, [stats]);
 
     useEffect(() => {
         let mounted = true;
 
-        const loadStats = async () => {
+        const loadData = async () => {
+            setLoading(true);
+            setError('');
             try {
-                const response = await apiFetch('/statystyki');
-                if (!response.ok) {
-                    if (response.status === 401 || response.status === 403) {
-                        if (mounted) setAdminName(fallbackAdminName);
-                    }
-                    return;
+                const [statsRes, faultsRes] = await Promise.all([
+                    apiFetch('/statystyki'),
+                    apiFetch('/usterki'),
+                ]);
+
+                if (!statsRes.ok) {
+                    const body = await readJsonOrText(statsRes);
+                    throw new Error(typeof body === 'string' ? body : body?.error || 'Nie udało się pobrać statystyk.');
+                }
+                const statsData = await readJsonOrText(statsRes);
+                if (mounted) setStats(normalizeStats(statsData));
+
+                if (faultsRes.ok) {
+                    const faultsData = await readJsonOrText(faultsRes);
+                    const items = Array.isArray(faultsData) ? faultsData : faultsData?.items || [];
+                    if (mounted) setFaults(items);
+                } else if (faultsRes.status === 404) {
+                    if (mounted) setFaults([]);
+                } else {
+                    const body = await readJsonOrText(faultsRes);
+                    throw new Error(typeof body === 'string' ? body : body?.error || 'Nie udało się pobrać usterek.');
                 }
 
-                const data = await readJsonOrText(response);
-                if (!mounted || !data) return;
-
-                setAdminName(data.adminName || data.nazwa_uzytkownika || fallbackAdminName);
-                setLineData(data.lineData || data.oblozenie || data.raportOblozenia || fallbackLineData);
-                setPieData(data.pieData || data.currentOccupation || data.oblozenieBiezace || fallbackPieData);
-                setBarData(data.barData || data.roomStats || data.statystykiPokoi || fallbackBarData);
-                setFaults(data.faults || data.usterki || fallbackFaults);
-                setDebtors(data.debtors || data.debtorsList || data.zadluzenie || fallbackDebtors);
+                const role = sessionStorage.getItem('userRole') || '';
+                if (mounted && role) {
+                    setAdminName(role);
+                }
             } catch (err) {
-                console.error('Admin stats load error:', err);
+                console.error('Admin dashboard load error:', err);
+                if (mounted) setError(err.message || 'Nie udało się pobrać danych panelu administratora.');
+            } finally {
+                if (mounted) setLoading(false);
             }
         };
 
-        loadStats();
+        loadData();
         return () => {
             mounted = false;
         };
@@ -120,10 +132,34 @@ const AdminDashboard = () => {
 
     const closeModal = () => setActiveModal(null);
 
-    const handleSubmit = (e) => {
+    const handleResolveFault = async (e) => {
         e.preventDefault();
-        alert('Akcja zakończona sukcesem!');
-        closeModal();
+        if (!selectedFault) {
+            alert('Wybierz usterkę z listy.');
+            return;
+        }
+        try {
+            const response = await apiFetch(`/usterki/${selectedFault}/status`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: statusToSet }),
+            });
+
+            if (!response.ok) {
+                const body = await readJsonOrText(response);
+                alert(typeof body === 'string' ? body : body?.error || 'Nie udało się zaktualizować statusu usterki.');
+                return;
+            }
+
+            setFaults((prev) => prev.map((fault) => (
+                fault.id === selectedFault ? { ...fault, status: statusToSet } : fault
+            )));
+            closeModal();
+            alert('Status usterki został zaktualizowany.');
+        } catch (err) {
+            console.error('Resolve fault error:', err);
+            alert(err.message || 'Nie udało się zaktualizować statusu usterki.');
+        }
     };
 
     const handleGenerateReportPdf = () => {
@@ -135,7 +171,7 @@ const AdminDashboard = () => {
         const pdf = new jsPDF();
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(20);
-        pdf.text('RAPORT FINANSOWO-ADMINISTRACYJNY', 20, 20);
+        pdf.text('RAPORT ADMINISTRACYJNY', 20, 20);
         pdf.setFontSize(14);
         pdf.setTextColor(100, 100, 100);
         pdf.text('System Akademik+', 20, 30);
@@ -146,29 +182,10 @@ const AdminDashboard = () => {
         pdf.setFontSize(12);
         pdf.text(`Okres raportu: ${startDate} do ${endDate}`, 20, 45);
         pdf.text(`Wygenerowano przez: ${removePolishChars(adminName)}`, 20, 52);
-        pdf.setFont('helvetica', 'bold');
-        pdf.text('Podsumowanie ogolne:', 20, 65);
-        pdf.setFont('helvetica', 'normal');
-        pdf.text(`- Suma zaleglych oplat: ${totalDebt.toFixed(2)} PLN`, 20, 72);
-        pdf.text('- Srednie oblozenie: 88%', 20, 79);
-        pdf.text(`- Nierozwiazane usterki: ${faults.length}`, 20, 86);
-        pdf.setFont('helvetica', 'bold');
-        pdf.text('Lista dluznikow:', 20, 100);
-        pdf.setFont('helvetica', 'normal');
-        pdf.line(20, 103, 190, 103);
-
-        let startY = 110;
-        debtors.forEach((debtor, index) => {
-            const cleanName = removePolishChars(debtor.name);
-            pdf.text(`${index + 1}. ${cleanName} (Pokoj ${debtor.room}) - ${debtor.amount} PLN`, 20, startY);
-            startY += 7;
-        });
-
-        pdf.line(20, startY + 3, 190, startY + 3);
-        pdf.setTextColor(150, 150, 150);
-        pdf.setFont('helvetica', 'italic');
-        pdf.setFontSize(10);
-        pdf.text('Poufny dokument wewnetrzny. Nie udostepniac osobom trzecim.', 20, 280);
+        pdf.text(`Wszystkie pokoje: ${stats.wszystkie_pokoje}`, 20, 65);
+        pdf.text(`Zajęte pokoje: ${stats.zajete_pokoje}`, 20, 72);
+        pdf.text(`Nieopłacone rachunki: ${stats.nieoplacone_rachunki}`, 20, 79);
+        pdf.text(`Otwarte usterki: ${stats.otwarte_usterki}`, 20, 86);
         pdf.save(`Raport_${startDate}_${endDate}.pdf`);
     };
 
@@ -189,8 +206,10 @@ const AdminDashboard = () => {
                 </div>
             </header>
 
+            {error && <div className="error-message" role="alert">{error}</div>}
+            {loading && <div className="loading-message">Ładowanie danych z API...</div>}
+
             <div className="admin-grid">
-                {/* KOLUMNA 1: Raport obłożenia */}
                 <div className="admin-card line-card">
                     <h3 className="card-title">Raport obłożenia</h3>
                     <div className="recharts-container" style={{ width: '100%', height: 280, minHeight: 200 }}>
@@ -201,15 +220,14 @@ const AdminDashboard = () => {
                                 <YAxis tick={{ fontSize: 12, fill: '#64748b' }} tickFormatter={(tick) => `${tick}%`} />
                                 <Tooltip />
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
-                                <Line type="linear" dataKey="free" stroke="#1b6392" strokeWidth={3} dot={false} />
-                                <Line type="linear" dataKey="pending" stroke="#e87823" strokeWidth={3} dot={false} />
-                                <Line type="linear" dataKey="occupied" stroke="#1b6e2d" strokeWidth={3} dot={false} />
+                                <Line type="linear" dataKey="free" stroke={COLORS.free} strokeWidth={3} dot={false} />
+                                <Line type="linear" dataKey="pending" stroke={COLORS.pending} strokeWidth={3} dot={false} />
+                                <Line type="linear" dataKey="occupied" stroke={COLORS.occupied} strokeWidth={3} dot={false} />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
 
-                {/* KOLUMNA 2: Obłożenie bieżące */}
                 <div className="admin-card pie-card">
                     <h3 className="card-title">Obłożenie bieżące</h3>
                     <div className="recharts-container" style={{ width: '100%', height: 220, minHeight: 160 }}>
@@ -220,33 +238,31 @@ const AdminDashboard = () => {
                                         <Cell key={`cell-${index}`} fill={entry.color} />
                                     ))}
                                 </Pie>
-                                <Tooltip formatter={(value) => `${value}%`} />
+                                <Tooltip />
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
 
-                {/* KOLUMNA 3: Lista usterek */}
                 <div className="admin-card faults-card">
                     <h3 className="card-title">Lista usterek</h3>
                     <div className="faults-list">
-                        {faults.map((fault) => (
+                        {faults.length ? faults.map((fault) => (
                             <div
                                 key={fault.id}
                                 className={`fault-item ${selectedFault === fault.id ? 'selected' : ''}`}
                                 onClick={() => setSelectedFault(fault.id)}
                             >
-                                {fault.desc}
+                                {faultDescription(fault)}
                             </div>
-                        ))}
+                        )) : <div>Brak usterek.</div>}
                     </div>
                     <button className="primary-btn mt-auto" onClick={() => setActiveModal('resolveFault')}>
-                        Rozwiąż usterkę
+                        Zmień status usterki
                     </button>
                 </div>
 
-                {/* KOLUMNA 1 (DÓŁ): Statystyki pokoi */}
                 <div className="admin-card bar-chart-card">
                     <div className="bar-layout-wrapper">
                         <h3 className="card-title left-title">Statystyki<br/>wykorzystania<br/>pokoi</h3>
@@ -257,29 +273,25 @@ const AdminDashboard = () => {
                                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} />
                                     <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(tick) => `${tick}%`} />
                                     <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(value) => `${value}%`} />
-                                    <Bar dataKey="usage" fill="#1b6392" radius={[4, 4, 0, 0]} barSize={30} />
+                                    <Bar dataKey="usage" fill={COLORS.free} radius={[4, 4, 0, 0]} barSize={30} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
                     </div>
                 </div>
 
-                {/* KOLUMNA 2 (DÓŁ): Szybkie akcje */}
                 <div className="admin-card actions-card">
                     <h3 className="card-title">Szybkie akcje</h3>
                     <div className="action-buttons">
-                        <button className="primary-btn" onClick={() => setActiveModal('addStudent')}>Dodaj studenta</button>
-                        <button className="primary-btn" onClick={() => setActiveModal('assignRoom')}>Przypisz pokój</button>
-                        <button className="primary-btn" onClick={() => setActiveModal('changePrices')}>Zmień ceny</button>
+                        <button className="primary-btn" onClick={() => setActiveModal('resolveFault')}>Zmień status usterki</button>
                     </div>
                 </div>
 
-                {/* KOLUMNA 3 (DÓŁ): Podsumowanie finansowe */}
                 <div className="admin-card finance-card">
                     <h3 className="card-title">Podsumowanie finansowe</h3>
                     <div className="finance-debt">
-                        <span className="debt-label">zaległe opłaty:</span>
-                        <span className="debt-amount">{totalDebt} zł</span>
+                        <span className="debt-label">nieopłacone rachunki:</span>
+                        <span className="debt-amount">{totalDebt}</span>
                     </div>
                     <div className="date-pickers">
                         <input type="date" className="date-input" title="Okres od" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
@@ -291,141 +303,27 @@ const AdminDashboard = () => {
                 </div>
             </div>
 
-            {/* OVLERALY I MODALE (POPUPY) */}
-            {activeModal && (
+            {activeModal === 'resolveFault' && (
                 <div className="admin-modal-overlay">
                     <div className="admin-modal-content">
-
-                        {/* Wariant: Dodaj studenta (Tabela: Uzytkownicy) */}
-                        {activeModal === 'addStudent' && (
-                            <form onSubmit={handleSubmit}>
-                                <h2>Dodaj nowego użytkownika</h2>
-
-                                <div className="form-group-row">
-                                    <div className="form-group">
-                                        <label>Imię:</label>
-                                        <input type="text" name="imie" required placeholder="Wpisz imię" />
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Nazwisko:</label>
-                                        <input type="text" name="nazwisko" required placeholder="Wpisz nazwisko" />
-                                    </div>
-                                </div>
-
-                                <div className="form-group">
-                                    <label>Email:</label>
-                                    <input type="email" name="email" required placeholder="np. jan@domena.pl" />
-                                </div>
-
-                                <div className="form-group">
-                                    <label>Numer telefonu:</label>
-                                    <input type="tel" name="numer_telefonu" required placeholder="np. 123456789" />
-                                </div>
-
-                                <div className="form-group-row">
-                                    <div className="form-group">
-                                        <label>Username (Login):</label>
-                                        <input type="text" name="username" required placeholder="np. jankowalski" />
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Hasło:</label>
-                                        <input type="password" name="password_hash" required placeholder="Wpisz hasło" />
-                                    </div>
-                                </div>
-
-                                {/* Pole boolean z bazy danych */}
-                                <div className="form-group checkbox-group">
-                                    <input type="checkbox" id="czy_wymaga_dostosowan" name="czy_wymaga_dostosowan" />
-                                    <label htmlFor="czy_wymaga_dostosowan">Wymaga dostosowań (niepełnosprawność)</label>
-                                </div>
-
-                                <div className="modal-buttons">
-                                    <button type="button" className="cancel-btn" onClick={closeModal}>Anuluj</button>
-                                    <button type="submit" className="confirm-btn">Dodaj studenta</button>
-                                </div>
-                            </form>
-                        )}
-
-                        {/* Wariant: Przypisz pokój (Tabela: Zakwaterowania) */}
-                        {activeModal === 'assignRoom' && (
-                            <form onSubmit={handleSubmit}>
-                                <h2>Zakwaterowanie</h2>
-                                <div className="form-group">
-                                    <label>Mieszkaniec (mieszkaniec_id):</label>
-                                    <select name="mieszkaniec_id" required>
-                                        <option value="">-- Wybierz użytkownika --</option>
-                                        <option value="1">Jan Kowalski</option>
-                                        <option value="2">Anna Nowak</option>
-                                    </select>
-                                </div>
-                                <div className="form-group">
-                                    <label>Pokój (pokoj_id):</label>
-                                    <select name="pokoj_id" required>
-                                        <option value="">-- Wybierz dostępny pokój --</option>
-                                        <option value="101">Pokój 101</option>
-                                        <option value="105">Pokój 105</option>
-                                    </select>
-                                </div>
-
-                                <div className="form-group-row">
-                                    <div className="form-group">
-                                        <label>Początek zakwaterowania:</label>
-                                        <input type="date" name="poczatek_zakwaterowania" required />
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Koniec zakwaterowania:</label>
-                                        <input type="date" name="koniec_zakwaterowania" />
-                                    </div>
-                                </div>
-
-                                <div className="modal-buttons">
-                                    <button type="button" className="cancel-btn" onClick={closeModal}>Anuluj</button>
-                                    <button type="submit" className="confirm-btn">Przypisz pokój</button>
-                                </div>
-                            </form>
-                        )}
-
-                        {/* Wariant: Zmień ceny (Tabela: Cennik) */}
-                        {activeModal === 'changePrices' && (
-                            <form onSubmit={handleSubmit}>
-                                <h2>Zmiana cen</h2>
-                                <div className="form-group-row">
-                                    <div className="form-group">
-                                        <label>Cena 1-osobowy:</label>
-                                        <input type="number" name="cena_1os" required placeholder="np. 800" />
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Cena 2-osobowy:</label>
-                                        <input type="number" name="cena_2os" required placeholder="np. 700" />
-                                    </div>
-                                </div>
-                                <div className="form-group">
-                                    <label>Cena 3-osobowy:</label>
-                                    <input type="number" name="cena_3os" required placeholder="np. 600" />
-                                </div>
-                                <div className="modal-buttons">
-                                    <button type="button" className="cancel-btn" onClick={closeModal}>Anuluj</button>
-                                    <button type="submit" className="confirm-btn">Zapisz zmiany</button>
-                                </div>
-                            </form>
-                        )}
-
-                        {/* Wariant: Rozwiąż usterkę (Tabela: Usterki) */}
-                        {activeModal === 'resolveFault' && (
-                            <form onSubmit={handleSubmit}>
-                                <h2>Rozwiązanie usterki</h2>
-                                <p><strong>Wybrana usterka:</strong> {selectedFault ? faults.find(f => f.id === selectedFault)?.desc : 'Brak wyboru'}</p>
-                                <div className="form-group">
-                                    <label>Opis działania naprawczego:</label>
-                                    <textarea rows="5" required placeholder="Opisz rozwiązanie"></textarea>
-                                </div>
-                                <div className="modal-buttons">
-                                    <button type="button" className="cancel-btn" onClick={closeModal}>Anuluj</button>
-                                    <button type="submit" className="confirm-btn">Zamknij usterkę</button>
-                                </div>
-                            </form>
-                        )}
-
+                        <form onSubmit={handleResolveFault}>
+                            <h2>Zmiana statusu usterki</h2>
+                            <p><strong>Wybrana usterka:</strong> {selectedFault ? faultDescription(faults.find((f) => f.id === selectedFault) || {}) : 'Brak wyboru'}</p>
+                            <div className="form-group">
+                                <label>Nowy status:</label>
+                                <select value={statusToSet} onChange={(e) => setStatusToSet(e.target.value)}>
+                                    <option value="Przyjeto">Przyjęto</option>
+                                    <option value="Weryfikacja">Weryfikacja</option>
+                                    <option value="W_trakcie_naprawy">W trakcie naprawy</option>
+                                    <option value="Naprawiono">Naprawiono</option>
+                                    <option value="Zakonczono_bez_naprawy">Zakończono bez naprawy</option>
+                                </select>
+                            </div>
+                            <div className="modal-buttons">
+                                <button type="button" className="cancel-btn" onClick={closeModal}>Anuluj</button>
+                                <button type="submit" className="confirm-btn">Zapisz</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

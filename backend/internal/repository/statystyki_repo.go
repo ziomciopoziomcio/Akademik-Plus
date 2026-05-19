@@ -22,7 +22,7 @@ func (r *StatystykiRepo) GetDashboardStats() (*models.AdminStats, error) {
 		return nil, err
 	}
 
-	err = r.db.Get(&stats.OtwarteUsterki, `SELECT COUNT(*) FROM usterki WHERE status != 'Rozwiazane'`)
+	err = r.db.Get(&stats.OtwarteUsterki, `SELECT COUNT(*) FROM usterki WHERE status NOT IN ('Naprawiono', 'Zakonczono_bez_naprawy')`)
 	if err != nil {
 		return nil, err
 	}

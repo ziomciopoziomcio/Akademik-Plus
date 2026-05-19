@@ -4,7 +4,6 @@ import (
 	"akademik/internal/middleware"
 	"akademik/internal/services"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"net/http"
 )
@@ -20,28 +19,24 @@ func NewZakwaterowaniaHandler(svc *services.ZakwaterowaniaService) *Zakwaterowan
 func (h *ZakwaterowaniaHandler) GetMojeZakwaterowania(w http.ResponseWriter, r *http.Request) {
 	userIDval := r.Context().Value(middleware.UserIDKey)
 	if userIDval == nil {
-		http.Error(w, "brak autoryzacji", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "brak autoryzacji")
 		return
 	}
 
 	userID, ok := userIDval.(int)
 	if !ok {
-		http.Error(w, "invalid user id type in context", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "nieprawidlowy identyfikator uzytkownika")
 		return
 	}
 
 	zakwaterowanie, err := h.svc.GetCurrentAccommodation(userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Zakwaterowania not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "brak aktywnego zakwaterowania")
 			return
 		}
-		http.Error(w, "Zakwaterowania service error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "nie udalo sie pobrac zakwaterowania")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(zakwaterowanie); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusOK, zakwaterowanie)
 }

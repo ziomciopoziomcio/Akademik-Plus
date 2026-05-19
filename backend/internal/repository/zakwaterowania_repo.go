@@ -23,9 +23,14 @@ func (r *ZakwaterowaniaRepo) GetCurrentByMieszkaniecID(mieszkaniecID int) (*mode
 			z.pokoj_id, 
 			z.poczatek_zakwaterowania, 
 			z.koniec_zakwaterowania,
-			p.numer_pokoju
+			p.numer_pokoju,
+			p.standard AS standard_pokoju,
+			a.adres AS akademik_adres,
+			CONCAT(u.imie, ' ', u.nazwisko) AS mieszkaniec_nazwa
 		FROM zakwaterowania z
 		JOIN pokoj p ON z.pokoj_id = p.id
+		JOIN akademiki a ON p.akademik_id = a.id
+		JOIN uzytkownicy u ON z.mieszkaniec_id = u.id
 		WHERE z.mieszkaniec_id = $1
 		ORDER BY z.poczatek_zakwaterowania DESC
 		LIMIT 1

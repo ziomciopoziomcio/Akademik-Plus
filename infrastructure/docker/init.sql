@@ -11,19 +11,6 @@ CREATE TABLE uzytkownicy
     czy_wymaga_dostosowan BOOLEAN NOT NULL DEFAULT FALSE
 );
 
-CREATE TABLE usterki
-(
-    id                          SERIAL PRIMARY KEY,
-    zglaszajacy_id              INT       NOT NULL REFERENCES uzytkownicy (id),
-    pokoj_id                    INT       NOT NULL REFERENCES pokoj(id),
-    priorytet                   TEXT      NOT NULL,
-    status                      TEXT      NOT NULL,
-    przypisany_administrator_id INT REFERENCES uzytkownicy (id),
-    opis_usterki                TEXT      NOT NULL,
-    data_zgloszenia             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    data_rozwiazania            TIMESTAMP
-);
-
 --  akademiki.go
 
 CREATE TABLE akademiki
@@ -59,6 +46,19 @@ CREATE TABLE zakwaterowania
     pokoj_id INT NOT NULL REFERENCES pokoj(id),
     poczatek_zakwaterowania DATE NOT NULL,
     koniec_zakwaterowania DATE NOT NULL
+);
+
+CREATE TABLE usterki
+(
+    id                          SERIAL PRIMARY KEY,
+    zglaszajacy_id              INT       NOT NULL REFERENCES uzytkownicy (id),
+    pokoj_id                    INT       NOT NULL REFERENCES pokoj(id),
+    priorytet                   TEXT      NOT NULL,
+    status                      TEXT      NOT NULL,
+    przypisany_administrator_id INT REFERENCES uzytkownicy (id),
+    opis_usterki                TEXT      NOT NULL,
+    data_zgloszenia             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    data_rozwiazania            TIMESTAMP
 );
 
 CREATE TABLE cennik

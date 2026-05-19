@@ -43,13 +43,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowe dane logowania")
 		return
 	}
 
 	token, err := h.service.Login(payload.Email, payload.Password)
 	if err != nil {
-		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "nieprawidlowy email lub haslo")
 		return
 	}
 
@@ -58,6 +58,5 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		response["rola"] = role
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusOK, response)
 }

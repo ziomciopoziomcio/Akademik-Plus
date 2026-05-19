@@ -1,21 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { useNavigate } from 'react-router-dom';
 import './PaymentHistory.css';
 import { apiFetch, readJsonOrText, clearAuthToken } from '../api';
-
-const fallbackPayments = [
-    { id: 1, date: '10-05-2026', desc: 'Opłata za pokój 101, maj 2026', amount: 700, status: 'NIEOPŁACONE' },
-    { id: 2, date: '10-04-2026', desc: 'Opłata za pokój 101, kwiecień 2026', amount: 700, status: 'OPŁACONE' },
-    { id: 3, date: '10-03-2026', desc: 'Opłata za pokój 101, marzec 2026', amount: 700, status: 'OPŁACONE' },
-    { id: 4, date: '10-02-2026', desc: 'Opłata za pokój 101, luty 2026', amount: 700, status: 'OPŁACONE' },
-    { id: 5, date: '10-01-2026', desc: 'Opłata za pokój 101, styczeń 2026', amount: 700, status: 'OPŁACONE' },
-    { id: 6, date: '10-12-2025', desc: 'Opłata za pokój 101, grudzień 2025', amount: 700, status: 'OPŁACONE' },
-    { id: 7, date: '10-11-2025', desc: 'Opłata za pokój 101, listopad 2025', amount: 700, status: 'OPŁACONE' },
-    { id: 8, date: '10-10-2025', desc: 'Opłata za pokój 101, październik 2025', amount: 700, status: 'OPŁACONE' },
-    { id: 9, date: '10-09-2025', desc: 'Opłata za pokój 30, wrzesień 2025', amount: 700, status: 'OPŁACONE' },
-    { id: 10, date: '10-08-2025', desc: 'Opłata za pokój 30, sierpień 2025', amount: 700, status: 'OPŁACONE' },
-];
 
 const removePolishChars = (text) => {
     if (!text) return '';
@@ -27,20 +14,21 @@ const removePolishChars = (text) => {
 };
 
 const mapPayment = (payment) => ({
-    id: payment.id ?? `${payment.data || payment.date}-${payment.opis || payment.desc}`,
-    date: payment.data || payment.date || '',
-    desc: payment.opis || payment.desc || '',
+    id: payment.numer_rachunku ?? payment.id ?? `${payment.data || payment.date}-${payment.opis || payment.desc}`,
+    date: payment.data_wystawienia || payment.data || payment.date || '',
+    desc: payment.okres_rozliczeniowy || payment.opis || payment.desc || '',
     amount: Number(payment.kwota ?? payment.amount ?? 0),
-    status: (payment.oplacone === true || payment.status === 'OPŁACONE' ? 'OPŁACONE' : payment.status || 'NIEOPŁACONE').toString().toUpperCase(),
+    status: (payment.czy_oplacone === true || payment.oplacone === true || payment.status === 'OPŁACONE' ? 'OPŁACONE' : payment.status || 'NIEOPŁACONE').toString().toUpperCase(),
 });
 
 const PaymentHistory = () => {
     const navigate = useNavigate();
-    const [payments, setPayments] = useState(fallbackPayments);
+    const [payments, setPayments] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [emptyMessage, setEmptyMessage] = useState('');
 
     useEffect(() => {
         let mounted = true;
@@ -48,21 +36,30 @@ const PaymentHistory = () => {
         const loadPayments = async () => {
             setLoading(true);
             setError('');
+            setEmptyMessage('');
 
             try {
-                const response = await apiFetch('/rachunki/uzytkownik/1');
+                const response = await apiFetch('/rachunki/moje');
                 if (response.ok) {
                     const data = await readJsonOrText(response);
                     const items = Array.isArray(data) ? data : data?.rachunki || data?.items || [];
-                    if (mounted && items.length) {
+                    if (mounted) {
                         setPayments(items.map(mapPayment));
+                        if (!items.length) setEmptyMessage('Brak aktywnych rachunków.');
+                    }
+                } else if (response.status === 404) {
+                    if (mounted) {
+                        setPayments([]);
+                        setEmptyMessage('Brak aktywnych rachunków.');
                     }
                 } else if (response.status === 401 || response.status === 403) {
                     if (mounted) setError('Brak dostępu do historii płatności. Zaloguj się ponownie lub sprawdź uprawnienia.');
+                } else {
+                    if (mounted) setError('Nie udało się pobrać historii płatności.');
                 }
             } catch (err) {
                 console.error('Payment history load error:', err);
-                if (mounted) setError('Nie udało się pobrać rachunków z API. Wyświetlam dane zapasowe.');
+                if (mounted) setError('Nie udało się pobrać rachunków z API.');
             } finally {
                 if (mounted) setLoading(false);
             }
@@ -121,15 +118,9 @@ const PaymentHistory = () => {
     const handleConfirmPayment = () => {
         setIsProcessing(true);
         setTimeout(() => {
-            setPayments(prevPayments =>
-                prevPayments.map(payment =>
-                    payment.status === 'NIEOPŁACONE' ? { ...payment, status: 'OPŁACONE' } : payment
-                )
-            );
-
             setIsProcessing(false);
             setIsModalOpen(false);
-            alert('Płatność zakończona sukcesem!');
+            alert('Płatności są obsługiwane przez administrację.');
         }, 1500);
     };
 
@@ -167,7 +158,7 @@ const PaymentHistory = () => {
                         </tr>
                         </thead>
                         <tbody>
-                        {payments.map((payment) => (
+                        {payments.length ? payments.map((payment) => (
                             <tr key={payment.id}>
                                 <td className="col-date">{payment.date}</td>
                                 <td className="col-desc">{payment.desc}</td>
@@ -183,7 +174,11 @@ const PaymentHistory = () => {
                                     </button>
                                 </td>
                             </tr>
-                        ))}
+                        )) : (
+                            <tr>
+                                <td colSpan="5">{emptyMessage || 'Brak rachunków.'}</td>
+                            </tr>
+                        )}
                         </tbody>
                     </table>
                 </div>

@@ -24,21 +24,16 @@ func (h *UsterkiHandler) GetByPokoj(w http.ResponseWriter, r *http.Request) {
 	pokojIDStr := r.PathValue("id")
 	pokojID, err := strconv.Atoi(pokojIDStr)
 	if err != nil {
-		http.Error(w, "Invalid pokoj ID", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowe id pokoju")
 		return
 	}
 
 	usterki, err := h.service.GetByPokojID(pokojID)
 	if err != nil {
-		http.Error(w, "Failed to fetch usterki", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "nie udalo sie pobrac usterek")
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(usterki); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusOK, usterki)
 }
 
 func (h *UsterkiHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -46,56 +41,51 @@ func (h *UsterkiHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	err := json.NewDecoder(r.Body).Decode(&nowaUsterka)
 	if err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowe dane wejsciowe")
 		return
 	}
 
-	userID := r.Context().Value(middleware.UserIDKey).(int)
+	userIDRaw := r.Context().Value(middleware.UserIDKey)
+	userID, ok := userIDRaw.(int)
+	if !ok || userID <= 0 {
+		writeError(w, http.StatusUnauthorized, "brak autoryzacji")
+		return
+	}
 	nowaUsterka.ZglaszajacyID = userID
 
 	if nowaUsterka.ZglaszajacyID <= 0 {
-		http.Error(w, "ZglaszajacyID must be a positive integer", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "zglaszajacy_id musi byc dodatni")
 		return
 	}
 
 	if nowaUsterka.PokojID <= 0 {
-		http.Error(w, "PokojID must be a positive integer", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "pokoj_id musi byc dodatni")
 		return
 	}
 
 	if strings.TrimSpace(nowaUsterka.OpisUsterki) == "" {
-		http.Error(w, "Opis usterki cannot be empty", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "opis_usterki nie moze byc pusty")
 		return
 	}
 	if nowaUsterka.Priorytet == nil || strings.TrimSpace(string(*nowaUsterka.Priorytet)) == "" {
-		http.Error(w, "Priorytet is required", http.StatusBadRequest)
-		return
-	}
-	if strings.TrimSpace(string(nowaUsterka.Status)) == "" {
-		http.Error(w, "Status is required", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "priorytet jest wymagany")
 		return
 	}
 
 	err = h.service.CreateUsterka(&nowaUsterka)
 	if err != nil {
-		http.Error(w, "Failed to create usterka", http.StatusInternalServerError)
+		writeError(w, http.StatusBadRequest, "nie udalo sie utworzyc usterki")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	err = json.NewEncoder(w).Encode(nowaUsterka)
-	if err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusCreated, nowaUsterka)
 }
 
 func (h *UsterkiHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, "Invalid usterka ID", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowe id usterki")
 		return
 	}
 
@@ -104,41 +94,35 @@ func (h *UsterkiHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowe dane wejsciowe")
 		return
 	}
 
 	nowyStatus := models.StatusNaprawy(requestBody.Status)
 
 	if !nowyStatus.IsValid() {
-		http.Error(w, "Invalid usterka status", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowy status usterki")
 		return
 	}
 
 	err = h.service.UpdateStatus(id, nowyStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Failed to update usterka status", http.StatusInternalServerError)
+			writeError(w, http.StatusNotFound, "usterka nie istnieje")
 			return
 		}
-		http.Error(w, "Failed to update usterka status", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "nie udalo sie zaktualizowac statusu usterki")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Usterka status updated successfully"}`))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "status usterki zaktualizowany"})
 }
 
 func (h *UsterkiHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	usterki, err := h.service.GetAll()
 	if err != nil {
-		http.Error(w, "Failed to fetch usterki", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "nie udalo sie pobrac usterek")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(usterki); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusOK, usterki)
 }

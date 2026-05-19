@@ -23,32 +23,28 @@ func (h *KomentarzeHandler) GetKomentarze(w http.ResponseWriter, r *http.Request
 	idStr := r.PathValue("id")
 	usterkaID, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowe id usterki")
 		return
 	}
 	komentarze, err := h.svc.GetCzatUsterki(usterkaID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "nie udalo sie pobrac komentarzy")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(komentarze); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusOK, komentarze)
 }
 
 func (h *KomentarzeHandler) AddKomentarz(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	usterkaID, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowe id usterki")
 		return
 	}
 	userIDval := r.Context().Value(middleware.UserIDKey)
 	autorID, ok := userIDval.(int)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "brak autoryzacji")
 		return
 	}
 	var input struct {
@@ -56,12 +52,12 @@ func (h *KomentarzeHandler) AddKomentarz(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "nieprawidlowe dane wejsciowe")
 		return
 	}
 	input.Tresc = strings.TrimSpace(input.Tresc)
 	if input.Tresc == "" {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "tresc komentarza nie moze byc pusta")
 		return
 	}
 	komentarz := &models.KomentarzUsterki{
@@ -71,13 +67,8 @@ func (h *KomentarzeHandler) AddKomentarz(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := h.svc.CreateKomentarz(komentarz); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "nie udalo sie dodac komentarza")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(komentarz); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusCreated, komentarz)
 }

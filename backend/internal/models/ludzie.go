@@ -28,4 +28,7 @@ type Zakwaterowanie struct {
 	PoczatekZakwaterowania time.Time `db:"poczatek_zakwaterowania" json:"poczatek_zakwaterowania"`
 	KoniecZakwaterowania   time.Time `db:"koniec_zakwaterowania" json:"koniec_zakwaterowania"`
 	NumerPokoju            string    `db:"numer_pokoju" json:"numer_pokoju,omitempty"`
+	StandardPokoju         string    `db:"standard_pokoju" json:"standard_pokoju,omitempty"`
+	AkademikAdres          string    `db:"akademik_adres" json:"akademik_adres,omitempty"`
+	MieszkaniecNazwa       string    `db:"mieszkaniec_nazwa" json:"mieszkaniec_nazwa,omitempty"`
 }

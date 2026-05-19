@@ -4,51 +4,48 @@ import './Dashboard.css';
 import roomImg from '../assets/room.png';
 import { apiFetch, readJsonOrText, clearAuthToken } from '../api';
 
-const fallbackUserData = { name: 'Jan Kowalski' };
-
-const fallbackPayments = [
-    { id: 1, date: '10-05-2026', desc: 'Opłata za pokój 101, maj 2026', amount: 700, status: 'NIEOPŁACONE' },
-    { id: 2, date: '10-04-2026', desc: 'Opłata za pokój 101, kwiecień 2026', amount: 700, status: 'OPŁACONE' },
-    { id: 3, date: '10-03-2026', desc: 'Opłata za pokój 101, marzec 2026', amount: 700, status: 'OPŁACONE' },
-    { id: 4, date: '10-02-2026', desc: 'Opłata za pokój 101, luty 2026', amount: 700, status: 'OPŁACONE' },
-    { id: 5, date: '10-01-2026', desc: 'Opłata za pokój 101, styczeń 2026', amount: 700, status: 'OPŁACONE' },
-    { id: 6, date: '10-12-2025', desc: 'Opłata za pokój 101, grudzień 2025', amount: 700, status: 'OPŁACONE' },
-    { id: 7, date: '10-11-2025', desc: 'Opłata za pokój 101, listopad 2025', amount: 700, status: 'OPŁACONE' },
-];
-
-const fallbackResidenceHistory = [
-    { id: 1, dorm: '3 Dom Studencki', room: 'Pokój 101', date: 'od 01-10-2025', isCurrent: true },
-    { id: 2, dorm: '3 Dom Studencki', room: 'Pokój 30', date: '01-10-2024 - 30-09-2025', isCurrent: false },
-    { id: 3, dorm: '3 Dom Studencki', room: 'Pokój 47', date: '01-10-2023 - 30-09-2024', isCurrent: false },
-    { id: 4, dorm: '1 Dom Studencki', room: 'Pokój 202', date: '01-10-2022 - 30-09-2023', isCurrent: false },
-];
-
-const fallbackRoomDetails = { type: 'Pokój standardowy', number: '101', dorm: '3 Dom Studencki' };
-
 const mapPayment = (payment) => ({
-    id: payment.id ?? payment.numer_rachunku ?? `${payment.data || payment.date}-${payment.opis || payment.desc}`,
+    id: payment.numer_rachunku ?? payment.id ?? `${payment.data || payment.date}-${payment.opis || payment.desc}`,
     date: payment.data_wystawienia || payment.data || payment.date || '',
-    desc: payment.dodatkowe_uwagi || payment.okres_rozliczeniowy || payment.opis || payment.desc || '',
+    desc: payment.okres_rozliczeniowy || payment.dodatkowe_uwagi || payment.opis || payment.desc || '',
     amount: Number(payment.kwota ?? payment.amount ?? 0),
     status: payment.czy_oplacone === true || payment.oplacone === true || payment.status === 'OPŁACONE' ? 'OPŁACONE' : 'NIEOPŁACONE',
 });
 
 const Dashboard = () => {
     const navigate = useNavigate();
-    const [userData, setUserData] = useState(fallbackUserData);
-    const [payments, setPayments] = useState(fallbackPayments);
-    const [residenceHistory, setResidenceHistory] = useState(fallbackResidenceHistory);
-    const [roomDetails, setRoomDetails] = useState(fallbackRoomDetails);
-    const [faultForm, setFaultForm] = useState({ roomNumber: '', category: '', description: '' });
+    const [userData, setUserData] = useState({ name: 'Mieszkańcu' });
+    const [payments, setPayments] = useState([]);
+    const [billsMessage, setBillsMessage] = useState('');
+    const [accommodation, setAccommodation] = useState(null);
+    const [accommodationMessage, setAccommodationMessage] = useState('');
+    const [faults, setFaults] = useState([]);
+    const [faultForm, setFaultForm] = useState({ pokoj_id: '', priorytet: '', opis_usterki: '' });
+    const [commentForm, setCommentForm] = useState({ faultId: '', tresc: '' });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
     useEffect(() => {
         let mounted = true;
+        const loadFaults = async (pokojId) => {
+            const faultsRes = await apiFetch(`/usterki/pokoj/${pokojId}`);
+            if (!faultsRes.ok) {
+                if (faultsRes.status === 404) {
+                    if (mounted) setFaults([]);
+                    return;
+                }
+                throw new Error('Nie udało się pobrać usterek.');
+            }
+            const faultsData = await readJsonOrText(faultsRes);
+            const faultsItems = Array.isArray(faultsData) ? faultsData : faultsData?.items || [];
+            if (mounted) setFaults(faultsItems);
+        };
 
         const loadDashboard = async () => {
             setLoading(true);
             setError('');
+            setBillsMessage('');
+            setAccommodationMessage('');
 
             try {
                 const [paymentsRes, residenceRes] = await Promise.all([
@@ -59,43 +56,49 @@ const Dashboard = () => {
                 if (paymentsRes.ok) {
                     const data = await readJsonOrText(paymentsRes);
                     const items = Array.isArray(data) ? data : data?.rachunki || data?.items || [];
-                    if (mounted && items.length) setPayments(items.map(mapPayment));
+                    if (mounted) {
+                        setPayments(items.map(mapPayment));
+                        if (!items.length) setBillsMessage('Brak aktywnych rachunków.');
+                    }
+                } else if (paymentsRes.status === 404) {
+                    if (mounted) {
+                        setPayments([]);
+                        setBillsMessage('Brak aktywnych rachunków.');
+                    }
                 } else if (paymentsRes.status === 401 || paymentsRes.status === 403) {
                     if (mounted) setError('Brak dostępu do rachunków. Zaloguj się ponownie.');
+                } else {
+                    if (mounted) setError('Nie udało się pobrać rachunków.');
                 }
 
                 if (residenceRes.ok) {
                     const data = await readJsonOrText(residenceRes);
                     const item = Array.isArray(data) ? data[0] : data;
                     if (mounted && item) {
-                        setResidenceHistory([
-                            {
-                                id: item.id || 1,
-                                dorm: item.akademik_nazwa || item.akademik || fallbackResidenceHistory[0].dorm,
-                                room: item.numer_pokoju ? `Pokój ${item.numer_pokoju}` : item.numer_pokoju === '' ? fallbackResidenceHistory[0].room : `Pokój ${item.numer_pokoju || item.pokoj_numer || fallbackRoomDetails.number}`,
-                                date: item.poczatek_zakwaterowania ? `od ${item.poczatek_zakwaterowania}` : fallbackResidenceHistory[0].date,
-                                isCurrent: true,
-                            },
-                        ]);
-
-                        setRoomDetails({
-                            type: item.standard || fallbackRoomDetails.type,
-                            number: String(item.numer_pokoju || item.pokoj_numer || fallbackRoomDetails.number),
-                            dorm: item.akademik_nazwa || item.akademik || fallbackRoomDetails.dorm,
-                        });
-                        setUserData({ name: item.mieszkaniec_imie_nazwisko || fallbackUserData.name });
-                        if (!faultForm.roomNumber && (item.numer_pokoju || item.pokoj_numer)) {
-                            setFaultForm((prev) => ({ ...prev, roomNumber: String(item.numer_pokoju || item.pokoj_numer) }));
+                        setAccommodation(item);
+                        setUserData({ name: item.mieszkaniec_nazwa || 'Mieszkańcu' });
+                        setFaultForm((prev) => ({
+                            ...prev,
+                            pokoj_id: String(item.pokoj_id || ''),
+                        }));
+                        if (item.pokoj_id) {
+                            await loadFaults(item.pokoj_id);
                         }
+                    }
+                } else if (residenceRes.status === 404) {
+                    if (mounted) {
+                        setAccommodation(null);
+                        setAccommodationMessage('Brak aktywnego zakwaterowania.');
+                        setFaults([]);
                     }
                 } else if (residenceRes.status === 401 || residenceRes.status === 403) {
                     if (mounted) setError((prev) => prev || 'Brak dostępu do historii zakwaterowań.');
-                } else if (residenceRes.status >= 500) {
-                    if (mounted) setError((prev) => prev || 'Błąd serwera przy pobieraniu zakwaterowania. Pokazuję dane zapasowe.');
+                } else {
+                    if (mounted) setError((prev) => prev || 'Błąd serwera przy pobieraniu zakwaterowania.');
                 }
             } catch (err) {
                 console.error('Dashboard load error:', err);
-                if (mounted) setError('Nie udało się pobrać danych z API. Wyświetlam dane zapasowe.');
+                if (mounted) setError('Nie udało się pobrać danych z API.');
             } finally {
                 if (mounted) setLoading(false);
             }
@@ -107,11 +110,19 @@ const Dashboard = () => {
 
     const handleFaultSubmit = async (e) => {
         e.preventDefault();
+        if (!faultForm.pokoj_id || !faultForm.priorytet || !faultForm.opis_usterki.trim()) {
+            alert('Uzupełnij wszystkie pola zgłoszenia.');
+            return;
+        }
         try {
             const response = await apiFetch('/usterki', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(faultForm),
+                body: JSON.stringify({
+                    pokoj_id: Number(faultForm.pokoj_id),
+                    priorytet: faultForm.priorytet,
+                    opis_usterki: faultForm.opis_usterki.trim(),
+                }),
             });
 
             if (!response.ok) {
@@ -120,11 +131,39 @@ const Dashboard = () => {
                 return;
             }
 
-            setFaultForm((prev) => ({ ...prev, category: '', description: '' }));
+            const createdFault = await readJsonOrText(response);
+            setFaults((prev) => [createdFault, ...prev]);
+            setFaultForm((prev) => ({ ...prev, priorytet: '', opis_usterki: '' }));
             alert('Usterka została zgłoszona.');
         } catch (err) {
             console.error('Fault submit error:', err);
             alert(err.message || 'Nie udało się zgłosić usterki');
+        }
+    };
+
+    const handleCommentSubmit = async (e) => {
+        e.preventDefault();
+        if (!commentForm.faultId || !commentForm.tresc.trim()) {
+            alert('Wybierz usterkę i wpisz komentarz.');
+            return;
+        }
+        try {
+            const response = await apiFetch(`/komentarze/usterka/${commentForm.faultId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tresc: commentForm.tresc.trim() }),
+            });
+
+            if (!response.ok) {
+                const body = await readJsonOrText(response);
+                alert(typeof body === 'string' ? body : body?.error || 'Nie udało się dodać komentarza');
+                return;
+            }
+            setCommentForm({ faultId: '', tresc: '' });
+            alert('Komentarz został dodany.');
+        } catch (err) {
+            console.error('Comment submit error:', err);
+            alert(err.message || 'Nie udało się dodać komentarza');
         }
     };
 
@@ -162,7 +201,7 @@ const Dashboard = () => {
                             </tr>
                             </thead>
                             <tbody>
-                            {payments.map((payment) => (
+                            {payments.length ? payments.map((payment) => (
                                 <tr key={payment.id}>
                                     <td>{payment.date}</td>
                                     <td>{payment.desc}</td>
@@ -173,7 +212,11 @@ const Dashboard = () => {
                                         </span>
                                     </td>
                                 </tr>
-                            ))}
+                            )) : (
+                                <tr>
+                                    <td colSpan="4">{billsMessage || 'Brak rachunków.'}</td>
+                                </tr>
+                            )}
                             </tbody>
                         </table>
                     </div>
@@ -185,16 +228,20 @@ const Dashboard = () => {
                 <div className="card panel-history">
                     <h3 className="card-title">Historia zamieszkania</h3>
                     <div className="timeline">
-                        {residenceHistory.map((item) => (
-                            <div key={item.id} className="timeline-item">
-                                <div className={`timeline-dot ${item.isCurrent ? 'current' : ''}`}></div>
+                        {accommodation ? (
+                            <div className="timeline-item">
+                                <div className="timeline-dot current"></div>
                                 <div className="timeline-content">
-                                    <strong>{item.dorm}</strong><br />
-                                    {item.room}<br />
-                                    <span className="timeline-date">{item.date}</span>
+                                    <strong>{accommodation.akademik_adres || 'Akademik'}</strong><br />
+                                    {`Pokój ${accommodation.numer_pokoju || '-'}`}<br />
+                                    <span className="timeline-date">{`od ${accommodation.poczatek_zakwaterowania || '-'}`}</span>
                                 </div>
                             </div>
-                        ))}
+                        ) : (
+                            <div className="timeline-item">
+                                <div className="timeline-content">{accommodationMessage || 'Brak aktywnego zakwaterowania.'}</div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -205,9 +252,9 @@ const Dashboard = () => {
                             <img src={roomImg} alt="Pokój" className="room-image" />
                         </div>
                         <div className="room-details">
-                            {roomDetails.type},<br />
-                            numer {roomDetails.number},<br />
-                            {roomDetails.dorm}
+                            {(accommodation?.standard_pokoju || 'Brak danych')},<br />
+                            numer {(accommodation?.numer_pokoju || '-')},<br />
+                            {(accommodation?.akademik_adres || 'Brak aktywnego zakwaterowania')}
                         </div>
                     </div>
                 </div>
@@ -216,31 +263,55 @@ const Dashboard = () => {
                     <h3 className="card-title">Zgłoszenie usterki</h3>
                     <form className="fault-form" onSubmit={handleFaultSubmit}>
                         <input
-                            type="text"
-                            placeholder="Podaj numer pokoju"
-                            value={faultForm.roomNumber}
-                            onChange={(e) => setFaultForm({ ...faultForm, roomNumber: e.target.value })}
+                            type="number"
+                            placeholder="Podaj ID pokoju"
+                            value={faultForm.pokoj_id}
+                            onChange={(e) => setFaultForm({ ...faultForm, pokoj_id: e.target.value })}
+                            disabled={!accommodation?.pokoj_id}
                         />
 
                         <select
-                            value={faultForm.category}
-                            onChange={(e) => setFaultForm({ ...faultForm, category: e.target.value })}
+                            value={faultForm.priorytet}
+                            onChange={(e) => setFaultForm({ ...faultForm, priorytet: e.target.value })}
                         >
                             <option value="" disabled>Wybierz kategorię usterki</option>
-                            <option value="hydraulika">Hydraulika</option>
-                            <option value="elektryka">Elektryka</option>
-                            <option value="meble">Meble/Wyposażenie</option>
-                            <option value="inne">Inne</option>
+                            <option value="BardzoPilne">Bardzo pilne</option>
+                            <option value="Pilne">Pilne</option>
+                            <option value="Normalny">Normalny</option>
+                            <option value="MozePoczekac">Może poczekać</option>
                         </select>
 
                         <textarea
                             placeholder="Opisz usterkę"
                             rows="8"
-                            value={faultForm.description}
-                            onChange={(e) => setFaultForm({ ...faultForm, description: e.target.value })}
+                            value={faultForm.opis_usterki}
+                            onChange={(e) => setFaultForm({ ...faultForm, opis_usterki: e.target.value })}
                         ></textarea>
 
                         <button type="submit" className="primary-btn mt-auto">Zgłoś usterkę</button>
+                    </form>
+
+                    <hr />
+                    <h4>Dodaj komentarz do usterki</h4>
+                    <form className="fault-form" onSubmit={handleCommentSubmit}>
+                        <select
+                            value={commentForm.faultId}
+                            onChange={(e) => setCommentForm({ ...commentForm, faultId: e.target.value })}
+                        >
+                            <option value="" disabled>Wybierz usterkę</option>
+                            {faults.map((fault) => (
+                                <option key={fault.id} value={fault.id}>
+                                    #{fault.id} - {fault.opis_usterki || fault.status}
+                                </option>
+                            ))}
+                        </select>
+                        <textarea
+                            placeholder="Treść komentarza"
+                            rows="4"
+                            value={commentForm.tresc}
+                            onChange={(e) => setCommentForm({ ...commentForm, tresc: e.target.value })}
+                        ></textarea>
+                        <button type="submit" className="primary-btn mt-auto">Dodaj komentarz</button>
                     </form>
                 </div>
 
