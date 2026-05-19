@@ -10,7 +10,8 @@ import (
 
 type RachunkiService interface {
 	GetByUzytkownikID(ctx context.Context, uzytkownikID int) ([]models.Rachunek, error)
-	MarkAsPaid(ctx context.Context, numer string) error
+	GetAll(ctx context.Context) ([]models.Rachunek, error)
+	UpdatePaidStatus(ctx context.Context, numer string, czyOplacone bool) error
 }
 
 type rachunkiService struct {
@@ -25,8 +26,12 @@ func (s *rachunkiService) GetByUzytkownikID(ctx context.Context, uzytkownikID in
 	return s.repo.GetByUzytkownikID(ctx, uzytkownikID)
 }
 
-func (s *rachunkiService) MarkAsPaid(ctx context.Context, numer string) error {
-	rows, err := s.repo.MarkAsPaid(ctx, numer)
+func (s *rachunkiService) GetAll(ctx context.Context) ([]models.Rachunek, error) {
+	return s.repo.GetAll(ctx)
+}
+
+func (s *rachunkiService) UpdatePaidStatus(ctx context.Context, numer string, czyOplacone bool) error {
+	rows, err := s.repo.SetPaidStatus(ctx, numer, czyOplacone)
 	if err != nil {
 		return err
 	}

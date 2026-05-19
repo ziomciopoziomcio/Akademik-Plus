@@ -66,3 +66,11 @@ func (r *PokojeRepo) GetByID(id int) (*models.Pokoj, error) {
 	}
 	return &pokoj, nil
 }
+
+func (r *PokojeRepo) UpdateStatus(ctx context.Context, id int, status models.StatusPokoju) (int64, error) {
+	res, err := r.db.ExecContext(ctx, "UPDATE pokoj SET status_pokoju = $1 WHERE id = $2", status, id)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

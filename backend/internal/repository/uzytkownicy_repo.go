@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"akademik/internal/models"
 	"fmt"
 
@@ -50,4 +51,18 @@ func (r *UzytkownicyRepo) GetByID(id int) (*models.Uzytkownik, error) {
 	var uzytkownik models.Uzytkownik
 	err := r.db.Get(&uzytkownik, "SELECT * FROM uzytkownicy WHERE id = $1", id)
 	return &uzytkownik, err
+}
+
+func (r *UzytkownicyRepo) GetAll(ctx context.Context) ([]models.Uzytkownik, error) {
+	uzytkownicy := []models.Uzytkownik{}
+	err := r.db.SelectContext(ctx, &uzytkownicy, "SELECT * FROM uzytkownicy ORDER BY id")
+	return uzytkownicy, err
+}
+
+func (r *UzytkownicyRepo) UpdateRole(ctx context.Context, id int, rola models.Rola) (int64, error) {
+	res, err := r.db.ExecContext(ctx, "UPDATE uzytkownicy SET rola = $1 WHERE id = $2", rola, id)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

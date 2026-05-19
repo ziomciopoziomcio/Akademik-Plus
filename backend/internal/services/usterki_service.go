@@ -45,3 +45,7 @@ func (s *UsterkiService) GetByPokojID(id int) ([]models.Usterka, error) {
 func (s *UsterkiService) GetAll() ([]models.Usterka, error) {
 	return s.repo.GetAll()
 }
+
+func (s *UsterkiService) GetByReporterID(userID int) ([]models.Usterka, error) {
+	return s.repo.GetByReporterID(userID)
+}

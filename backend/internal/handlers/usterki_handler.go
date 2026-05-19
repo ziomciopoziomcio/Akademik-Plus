@@ -126,3 +126,19 @@ func (h *UsterkiHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, usterki)
 }
+
+func (h *UsterkiHandler) GetMoje(w http.ResponseWriter, r *http.Request) {
+	userIDRaw := r.Context().Value(middleware.UserIDKey)
+	userID, ok := userIDRaw.(int)
+	if !ok || userID <= 0 {
+		writeError(w, http.StatusUnauthorized, "brak autoryzacji")
+		return
+	}
+
+	usterki, err := h.service.GetByReporterID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "nie udalo sie pobrac usterek")
+		return
+	}
+	writeJSON(w, http.StatusOK, usterki)
+}

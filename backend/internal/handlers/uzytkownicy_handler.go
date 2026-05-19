@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"akademik/internal/models"
 	"akademik/internal/services"
@@ -83,4 +84,46 @@ func (h *UzytkownicyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(nowy)
+}
+
+func (h *UzytkownicyHandler) GetAll(w http.ResponseWriter, r *http.Request) {
+	uzytkownicy, err := h.service.GetAll(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "nie udalo sie pobrac uzytkownikow")
+		return
+	}
+	writeJSON(w, http.StatusOK, uzytkownicy)
+}
+
+func (h *UzytkownicyHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "nieprawidlowe id uzytkownika")
+		return
+	}
+
+	var payload struct {
+		Rola string `json:"rola"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "nieprawidlowe dane wejsciowe")
+		return
+	}
+
+	rola := models.Rola(strings.TrimSpace(payload.Rola))
+	if err := h.service.UpdateRole(r.Context(), id, rola); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "uzytkownik nie istnieje")
+			return
+		}
+		if err.Error() == "invalid role" {
+			writeError(w, http.StatusBadRequest, "nieprawidlowa rola")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "nie udalo sie zaktualizowac roli")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "rola zaktualizowana"})
 }

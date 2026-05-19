@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"akademik/internal/middleware"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -55,16 +56,30 @@ func (h *RachunkiHandler) MarkAsPaid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.MarkAsPaid(r.Context(), numer); err != nil {
+	var payload struct {
+		CzyOplacone *bool `json:"czy_oplacone"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&payload)
+
+	status, err := h.resolvePaidStatus(r, payload.CzyOplacone)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.svc.UpdatePaidStatus(r.Context(), numer, status); err != nil {
 		if errors.Is(err, services.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "rachunek nie istnieje")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "nie udalo sie oznaczyc rachunku jako oplacony")
+		writeError(w, http.StatusInternalServerError, "nie udalo sie zaktualizowac statusu rachunku")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Rachunek oznaczony jako oplacony"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"message":      "status rachunku zaktualizowany",
+		"czy_oplacone": status,
+	})
 }
 
 func (h *RachunkiHandler) respondWithRachunki(w http.ResponseWriter, r *http.Request, userID int) {
@@ -74,4 +89,31 @@ func (h *RachunkiHandler) respondWithRachunki(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, rachunki)
+}
+
+func (h *RachunkiHandler) GetAll(w http.ResponseWriter, r *http.Request) {
+	rachunki, err := h.svc.GetAll(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "nie udalo sie pobrac rachunkow")
+		return
+	}
+	writeJSON(w, http.StatusOK, rachunki)
+}
+
+func (h *RachunkiHandler) resolvePaidStatus(r *http.Request, fromBody *bool) (bool, error) {
+	if fromBody != nil {
+		return *fromBody, nil
+	}
+
+	query := r.URL.Query().Get("czy_oplacone")
+	if query == "" {
+		return true, nil
+	}
+	if query == "true" {
+		return true, nil
+	}
+	if query == "false" {
+		return false, nil
+	}
+	return false, errors.New("nieprawidlowa wartosc czy_oplacone")
 }

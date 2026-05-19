@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strings"
@@ -51,4 +52,22 @@ func (s *UzytkownicyService) CreateUser(u *models.Uzytkownik, plainPassword stri
 
 func (s *UzytkownicyService) GetByID(id int) (*models.Uzytkownik, error) {
 	return s.repo.GetByID(id)
+}
+
+func (s *UzytkownicyService) GetAll(ctx context.Context) ([]models.Uzytkownik, error) {
+	return s.repo.GetAll(ctx)
+}
+
+func (s *UzytkownicyService) UpdateRole(ctx context.Context, id int, rola models.Rola) error {
+	if rola != models.Administrator && rola != models.Mieszkaniec {
+		return errors.New("invalid role")
+	}
+	rows, err := s.repo.UpdateRole(ctx, id, rola)
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

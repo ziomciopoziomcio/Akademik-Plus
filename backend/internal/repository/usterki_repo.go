@@ -35,7 +35,13 @@ func (r *UsterkiRepo) Create(u *models.Usterka) error {
 
 func (r *UsterkiRepo) GetByPokojID(pokojID int) ([]models.Usterka, error) {
 	usterki := []models.Usterka{}
-	err := r.db.Select(&usterki, "SELECT * FROM usterki WHERE pokoj_id = $1", pokojID)
+	err := r.db.Select(&usterki, "SELECT * FROM usterki WHERE pokoj_id = $1 ORDER BY data_zgloszenia DESC", pokojID)
+	return usterki, err
+}
+
+func (r *UsterkiRepo) GetByReporterID(userID int) ([]models.Usterka, error) {
+	usterki := []models.Usterka{}
+	err := r.db.Select(&usterki, "SELECT * FROM usterki WHERE zglaszajacy_id = $1 ORDER BY data_zgloszenia DESC", userID)
 	return usterki, err
 }
 

@@ -91,3 +91,36 @@ func (h *PokojeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 }
+
+func (h *PokojeHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "nieprawidlowe id pokoju")
+		return
+	}
+
+	var payload struct {
+		Status string `json:"status_pokoju"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "nieprawidlowe dane wejsciowe")
+		return
+	}
+
+	status := models.StatusPokoju(strings.TrimSpace(payload.Status))
+	if err := h.svc.UpdateStatus(r.Context(), id, status); err != nil {
+		if errors.Is(err, services.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "pokoj nie istnieje")
+			return
+		}
+		if err.Error() == "invalid room status" {
+			writeError(w, http.StatusBadRequest, "nieprawidlowy status pokoju")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "nie udalo sie zaktualizowac statusu pokoju")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "status pokoju zaktualizowany"})
+}
