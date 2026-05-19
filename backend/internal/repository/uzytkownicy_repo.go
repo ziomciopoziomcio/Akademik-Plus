@@ -18,8 +18,8 @@ func NewUzytkownicyRepo(db *sqlx.DB) *UzytkownicyRepo {
 
 func (r *UzytkownicyRepo) Create(uzytkownik *models.Uzytkownik) error {
 	query := `
-		INSERT INTO uzytkownicy (imie, nazwisko, email, password_hash, rola) 
-		VALUES (:imie, :nazwisko, :email, :password_hash, :rola)
+		INSERT INTO uzytkownicy (imie, nazwisko, email, numer_telefonu, username, password_hash, rola, czy_wymaga_dostosowan) 
+		VALUES (:imie, :nazwisko, :email, :numer_telefonu, :username, :password_hash, :rola, :czy_wymaga_dostosowan)
 		RETURNING id`
 	rows, err := r.db.NamedQuery(query, uzytkownik)
 	if err != nil {
@@ -61,6 +61,14 @@ func (r *UzytkownicyRepo) GetAll(ctx context.Context) ([]models.Uzytkownik, erro
 
 func (r *UzytkownicyRepo) UpdateRole(ctx context.Context, id int, rola models.Rola) (int64, error) {
 	res, err := r.db.ExecContext(ctx, "UPDATE uzytkownicy SET rola = $1 WHERE id = $2", rola, id)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (r *UzytkownicyRepo) Delete(ctx context.Context, id int) (int64, error) {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM uzytkownicy WHERE id = $1", id)
 	if err != nil {
 		return 0, err
 	}

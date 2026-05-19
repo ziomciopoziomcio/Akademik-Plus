@@ -26,8 +26,12 @@ func (r *PokojeRepo) GetAll(ctx context.Context) ([]models.Pokoj, error) {
 }
 
 func (r *PokojeRepo) Create(ctx context.Context, p *models.Pokoj) (int, error) {
-	query := `INSERT INTO pokoj (numer_pokoju, ile_osob, czy_kuchnia, akademik_id)
-			  VALUES (:numer_pokoju, :ile_osob, :czy_kuchnia, :akademik_id) RETURNING id`
+	query := `INSERT INTO pokoj (
+				numer_pokoju, ile_osob, czy_kuchnia, czy_toaleta, czy_dostosowany, pietro, status_pokoju, standard, akademik_id
+			  )
+			  VALUES (
+			  	:numer_pokoju, :ile_osob, :czy_kuchnia, :czy_toaleta, :czy_dostosowany, :pietro, :status_pokoju, :standard, :akademik_id
+			  ) RETURNING id`
 	rows, err := r.db.NamedQueryContext(ctx, query, p)
 	if err != nil {
 		return 0, err

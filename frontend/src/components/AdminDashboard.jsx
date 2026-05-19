@@ -45,6 +45,13 @@ const formatDateTime = (value) => {
     return date.toLocaleString('pl-PL');
 };
 
+const formatDate = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+    return date.toISOString().slice(0, 10);
+};
+
 const statusOptions = ['Przyjeto', 'Weryfikacja', 'W_trakcie_naprawy', 'Naprawiono', 'Zakonczono_bez_naprawy'];
 
 const AdminDashboard = () => {
@@ -62,6 +69,22 @@ const AdminDashboard = () => {
     const [accommodations, setAccommodations] = useState([]);
     const [userRoleDraft, setUserRoleDraft] = useState({});
     const [roomStatusDraft, setRoomStatusDraft] = useState({});
+    const [userForm, setUserForm] = useState({
+        imie: '',
+        nazwisko: '',
+        email: '',
+        numer_telefonu: '',
+        username: '',
+        password: '',
+        rola: 'Mieszkaniec',
+    });
+    const [roomForm, setRoomForm] = useState({
+        numer_pokoju: '',
+        ile_osob: '2',
+        pietro: '1',
+        akademik_id: '1',
+        status_pokoju: 'Dostepny',
+    });
     const [accommodationForm, setAccommodationForm] = useState({
         mieszkaniec_id: '',
         pokoj_id: '',
@@ -69,6 +92,8 @@ const AdminDashboard = () => {
         koniec_zakwaterowania: '',
     });
     const [checkoutForm, setCheckoutForm] = useState({ id: '', koniec_zakwaterowania: '' });
+    const [residentSearch, setResidentSearch] = useState('');
+    const [successMessage, setSuccessMessage] = useState('');
 
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -77,6 +102,15 @@ const AdminDashboard = () => {
     const [error, setError] = useState('');
 
     const totalDebt = stats.nieoplacone_rachunki;
+    const residentUsers = useMemo(() => users.filter((user) => user.rola === 'Mieszkaniec'), [users]);
+    const occupiedRoomIds = useMemo(() => {
+        const now = new Date();
+        return new Set(accommodations.filter((item) => new Date(item.koniec_zakwaterowania) >= now).map((item) => item.pokoj_id));
+    }, [accommodations]);
+    const availableRooms = useMemo(
+        () => rooms.filter((room) => room.status_pokoju === 'Dostepny' && !occupiedRoomIds.has(room.id)),
+        [rooms, occupiedRoomIds],
+    );
 
     const lineData = useMemo(() => {
         const total = Math.max(stats.wszystkie_pokoje, 1);
@@ -171,6 +205,12 @@ const AdminDashboard = () => {
         };
     }, []);
 
+    useEffect(() => {
+        if (!successMessage) return undefined;
+        const timeout = setTimeout(() => setSuccessMessage(''), 3000);
+        return () => clearTimeout(timeout);
+    }, [successMessage]);
+
     const loadUsers = async () => {
         const response = await apiFetch('/uzytkownicy');
         if (!response.ok) throw new Error('Nie udało się pobrać użytkowników.');
@@ -200,7 +240,9 @@ const AdminDashboard = () => {
         try {
             if (modal === 'users') await loadUsers();
             if (modal === 'rooms') await loadRooms();
-            if (modal === 'accommodations') await loadAccommodations();
+            if (modal === 'accommodations') {
+                await Promise.all([loadAccommodations(), loadUsers(), loadRooms()]);
+            }
             setActiveModal(modal);
         } catch (err) {
             alert(err.message || 'Nie udało się pobrać danych dla akcji administracyjnej.');
@@ -256,6 +298,44 @@ const AdminDashboard = () => {
             return;
         }
         setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, rola: userRoleDraft[userId] } : user)));
+        setSuccessMessage('Rola użytkownika została zaktualizowana.');
+    };
+
+    const handleCreateUser = async (e) => {
+        e.preventDefault();
+        const response = await apiFetch('/uzytkownicy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userForm),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się utworzyć użytkownika.');
+            return;
+        }
+        await loadUsers();
+        setUserForm({
+            imie: '',
+            nazwisko: '',
+            email: '',
+            numer_telefonu: '',
+            username: '',
+            password: '',
+            rola: 'Mieszkaniec',
+        });
+        setSuccessMessage(`Użytkownik ${userForm.imie} ${userForm.nazwisko} został dodany.`);
+    };
+
+    const handleDeleteUser = async (user) => {
+        if (!window.confirm(`Usunąć użytkownika ${user.imie} ${user.nazwisko}?`)) return;
+        const response = await apiFetch(`/uzytkownicy/${user.id}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się usunąć użytkownika.');
+            return;
+        }
+        await loadUsers();
+        setSuccessMessage(`Użytkownik ${user.imie} ${user.nazwisko} został usunięty.`);
     };
 
     const handleUpdateRoomStatus = async (roomId) => {
@@ -270,10 +350,50 @@ const AdminDashboard = () => {
             return;
         }
         setRooms((prev) => prev.map((room) => (room.id === roomId ? { ...room, status_pokoju: roomStatusDraft[roomId] } : room)));
+        setSuccessMessage('Status pokoju został zaktualizowany.');
+    };
+
+    const handleCreateRoom = async (e) => {
+        e.preventDefault();
+        const response = await apiFetch('/pokoje', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                numer_pokoju: roomForm.numer_pokoju,
+                ile_osob: Number(roomForm.ile_osob),
+                pietro: Number(roomForm.pietro),
+                akademik_id: Number(roomForm.akademik_id),
+                status_pokoju: roomForm.status_pokoju,
+            }),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się utworzyć pokoju.');
+            return;
+        }
+        await loadRooms();
+        setRoomForm({ numer_pokoju: '', ile_osob: '2', pietro: '1', akademik_id: '1', status_pokoju: 'Dostepny' });
+        setSuccessMessage(`Pokój ${roomForm.numer_pokoju} został dodany.`);
+    };
+
+    const handleDeleteRoom = async (room) => {
+        if (!window.confirm(`Usunąć pokój ${room.numer_pokoju}?`)) return;
+        const response = await apiFetch(`/pokoje/${room.id}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się usunąć pokoju.');
+            return;
+        }
+        await loadRooms();
+        setSuccessMessage(`Pokój ${room.numer_pokoju} został usunięty.`);
     };
 
     const handleCreateAccommodation = async (e) => {
         e.preventDefault();
+        if (!accommodationForm.mieszkaniec_id || !accommodationForm.pokoj_id) {
+            alert('Wybierz mieszkańca i pokój z listy.');
+            return;
+        }
         const response = await apiFetch('/zakwaterowania', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -289,8 +409,10 @@ const AdminDashboard = () => {
             alert(typeof body === 'string' ? body : body?.error || 'Nie udało się przypisać zakwaterowania.');
             return;
         }
-        await loadAccommodations();
+        await Promise.all([loadAccommodations(), loadRooms()]);
         setAccommodationForm({ mieszkaniec_id: '', pokoj_id: '', poczatek_zakwaterowania: '', koniec_zakwaterowania: '' });
+        setResidentSearch('');
+        setSuccessMessage('Zakwaterowanie zostało przypisane.');
     };
 
     const handleCheckout = async (e) => {
@@ -305,11 +427,20 @@ const AdminDashboard = () => {
             alert(typeof body === 'string' ? body : body?.error || 'Nie udało się zapisać wymeldowania.');
             return;
         }
-        await loadAccommodations();
+        await Promise.all([loadAccommodations(), loadRooms()]);
         setCheckoutForm({ id: '', koniec_zakwaterowania: '' });
+        setSuccessMessage('Wymeldowanie zostało zapisane.');
     };
 
     const closeModal = () => setActiveModal(null);
+
+    const residentOptionLabel = (user) => `${user.imie} ${user.nazwisko} (${user.email})`;
+
+    const handleResidentInputChange = (value) => {
+        setResidentSearch(value);
+        const selected = residentUsers.find((user) => residentOptionLabel(user) === value);
+        setAccommodationForm((prev) => ({ ...prev, mieszkaniec_id: selected ? String(selected.id) : '' }));
+    };
 
     const handleGenerateReportPdf = () => {
         if (!startDate || !endDate) {
@@ -343,6 +474,7 @@ const AdminDashboard = () => {
             <AppHeader role="Administrator" greeting={`Witaj, ${adminName}!`} />
 
             {error && <div className="error-message" role="alert">{error}</div>}
+            {successMessage && <div className="success-message" role="status">{successMessage}</div>}
             {loading && <div className="loading-message">Ładowanie danych z API...</div>}
 
             <div className="admin-grid">
@@ -495,12 +627,62 @@ const AdminDashboard = () => {
                 <div className="admin-modal-overlay" onClick={closeModal}>
                     <div className="admin-modal-content" onClick={(e) => e.stopPropagation()}>
                         <h2>Zarządzanie użytkownikami</h2>
+                        <form onSubmit={handleCreateUser} className="modal-form-grid user-form-grid">
+                            <input
+                                required
+                                placeholder="Imię"
+                                value={userForm.imie}
+                                onChange={(e) => setUserForm((prev) => ({ ...prev, imie: e.target.value }))}
+                            />
+                            <input
+                                required
+                                placeholder="Nazwisko"
+                                value={userForm.nazwisko}
+                                onChange={(e) => setUserForm((prev) => ({ ...prev, nazwisko: e.target.value }))}
+                            />
+                            <input
+                                required
+                                type="email"
+                                placeholder="Email"
+                                value={userForm.email}
+                                onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))}
+                            />
+                            <input
+                                required
+                                placeholder="Numer telefonu"
+                                value={userForm.numer_telefonu}
+                                onChange={(e) => setUserForm((prev) => ({ ...prev, numer_telefonu: e.target.value }))}
+                            />
+                            <input
+                                required
+                                placeholder="Username"
+                                value={userForm.username}
+                                onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))}
+                            />
+                            <input
+                                required
+                                minLength={6}
+                                type="password"
+                                placeholder="Hasło"
+                                value={userForm.password}
+                                onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))}
+                            />
+                            <select
+                                value={userForm.rola}
+                                onChange={(e) => setUserForm((prev) => ({ ...prev, rola: e.target.value }))}
+                            >
+                                <option value="Mieszkaniec">Mieszkaniec</option>
+                                <option value="Administrator">Administrator</option>
+                            </select>
+                            <button className="confirm-btn" type="submit">Dodaj użytkownika</button>
+                        </form>
                         <div className="table-like-list">
                             {users.map((user) => (
                                 <div className="list-row" key={user.id}>
-                                    <div>
+                                    <div className="list-main">
                                         <strong>{user.imie} {user.nazwisko}</strong><br />
                                         <span>{user.email}</span>
+                                        <div className="list-muted">Rola: {user.rola} • Tel: {user.numer_telefonu || '-'}</div>
                                     </div>
                                     <div className="row-actions">
                                         <select
@@ -511,6 +693,7 @@ const AdminDashboard = () => {
                                             <option value="Administrator">Administrator</option>
                                         </select>
                                         <button className="confirm-btn" onClick={() => handleUpdateUserRole(user.id)}>Zapisz rolę</button>
+                                        <button className="danger-btn" onClick={() => handleDeleteUser(user)}>Usuń</button>
                                     </div>
                                 </div>
                             ))}
@@ -526,12 +709,53 @@ const AdminDashboard = () => {
                 <div className="admin-modal-overlay" onClick={closeModal}>
                     <div className="admin-modal-content" onClick={(e) => e.stopPropagation()}>
                         <h2>Zarządzanie pokojami</h2>
+                        <form onSubmit={handleCreateRoom} className="modal-form-grid room-form-grid">
+                            <input
+                                required
+                                placeholder="Numer pokoju"
+                                value={roomForm.numer_pokoju}
+                                onChange={(e) => setRoomForm((prev) => ({ ...prev, numer_pokoju: e.target.value }))}
+                            />
+                            <input
+                                required
+                                type="number"
+                                min="1"
+                                placeholder="Liczba miejsc"
+                                value={roomForm.ile_osob}
+                                onChange={(e) => setRoomForm((prev) => ({ ...prev, ile_osob: e.target.value }))}
+                            />
+                            <input
+                                required
+                                type="number"
+                                min="1"
+                                placeholder="Piętro"
+                                value={roomForm.pietro}
+                                onChange={(e) => setRoomForm((prev) => ({ ...prev, pietro: e.target.value }))}
+                            />
+                            <input
+                                required
+                                type="number"
+                                min="1"
+                                placeholder="ID akademika"
+                                value={roomForm.akademik_id}
+                                onChange={(e) => setRoomForm((prev) => ({ ...prev, akademik_id: e.target.value }))}
+                            />
+                            <select
+                                value={roomForm.status_pokoju}
+                                onChange={(e) => setRoomForm((prev) => ({ ...prev, status_pokoju: e.target.value }))}
+                            >
+                                <option value="Dostepny">Dostepny</option>
+                                <option value="W_remoncie">W_remoncie</option>
+                            </select>
+                            <button className="confirm-btn" type="submit">Dodaj pokój</button>
+                        </form>
                         <div className="table-like-list">
                             {rooms.map((room) => (
                                 <div className="list-row" key={room.id}>
-                                    <div>
+                                    <div className="list-main">
                                         <strong>Pokój {room.numer_pokoju}</strong><br />
                                         <span>Status: {room.status_pokoju}</span>
+                                        <div className="list-muted">Miejsca: {room.ile_osob} • Piętro: {room.pietro}</div>
                                     </div>
                                     <div className="row-actions">
                                         <select
@@ -542,6 +766,7 @@ const AdminDashboard = () => {
                                             <option value="W_remoncie">W_remoncie</option>
                                         </select>
                                         <button className="confirm-btn" onClick={() => handleUpdateRoomStatus(room.id)}>Zapisz status</button>
+                                        <button className="danger-btn" onClick={() => handleDeleteRoom(room)}>Usuń</button>
                                     </div>
                                 </div>
                             ))}
@@ -558,10 +783,41 @@ const AdminDashboard = () => {
                     <div className="admin-modal-content" onClick={(e) => e.stopPropagation()}>
                         <h2>Zarządzanie zakwaterowaniami</h2>
                         <form onSubmit={handleCreateAccommodation} className="modal-form-grid">
-                            <input type="number" placeholder="ID mieszkańca" value={accommodationForm.mieszkaniec_id} onChange={(e) => setAccommodationForm((prev) => ({ ...prev, mieszkaniec_id: e.target.value }))} />
-                            <input type="number" placeholder="ID pokoju" value={accommodationForm.pokoj_id} onChange={(e) => setAccommodationForm((prev) => ({ ...prev, pokoj_id: e.target.value }))} />
-                            <input type="date" value={accommodationForm.poczatek_zakwaterowania} onChange={(e) => setAccommodationForm((prev) => ({ ...prev, poczatek_zakwaterowania: e.target.value }))} />
-                            <input type="date" value={accommodationForm.koniec_zakwaterowania} onChange={(e) => setAccommodationForm((prev) => ({ ...prev, koniec_zakwaterowania: e.target.value }))} />
+                            <input
+                                list="resident-options"
+                                placeholder="Wyszukaj mieszkańca (imię, nazwisko, email)"
+                                value={residentSearch}
+                                onChange={(e) => handleResidentInputChange(e.target.value)}
+                            />
+                            <datalist id="resident-options">
+                                {residentUsers.map((user) => (
+                                    <option key={user.id} value={residentOptionLabel(user)} />
+                                ))}
+                            </datalist>
+                            <select
+                                required
+                                value={accommodationForm.pokoj_id}
+                                onChange={(e) => setAccommodationForm((prev) => ({ ...prev, pokoj_id: e.target.value }))}
+                            >
+                                <option value="">Wybierz dostępny pokój</option>
+                                {availableRooms.map((room) => (
+                                    <option key={room.id} value={room.id}>
+                                        Pokój {room.numer_pokoju}
+                                    </option>
+                                ))}
+                            </select>
+                            <input
+                                required
+                                type="date"
+                                value={accommodationForm.poczatek_zakwaterowania}
+                                onChange={(e) => setAccommodationForm((prev) => ({ ...prev, poczatek_zakwaterowania: e.target.value }))}
+                            />
+                            <input
+                                required
+                                type="date"
+                                value={accommodationForm.koniec_zakwaterowania}
+                                onChange={(e) => setAccommodationForm((prev) => ({ ...prev, koniec_zakwaterowania: e.target.value }))}
+                            />
                             <button className="confirm-btn" type="submit">Przypisz mieszkańca do pokoju</button>
                         </form>
 
@@ -579,7 +835,7 @@ const AdminDashboard = () => {
                                         <span>{item.mieszkaniec_nazwa || `Mieszkaniec ${item.mieszkaniec_id}`}</span>
                                     </div>
                                     <div>
-                                        {item.poczatek_zakwaterowania} - {item.koniec_zakwaterowania}
+                                        {formatDate(item.poczatek_zakwaterowania)} - {formatDate(item.koniec_zakwaterowania)}
                                     </div>
                                 </div>
                             ))}

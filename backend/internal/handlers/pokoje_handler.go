@@ -9,6 +9,7 @@ import (
 
 	"akademik/internal/models"
 	"akademik/internal/services"
+	"github.com/lib/pq"
 )
 
 type PokojeHandler struct {
@@ -48,13 +49,28 @@ func (h *PokojeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ile_osob must be > 0", http.StatusBadRequest)
 		return
 	}
+	if p.Pietro <= 0 {
+		http.Error(w, "pietro is required", http.StatusBadRequest)
+		return
+	}
 	if p.AkademikID <= 0 {
 		http.Error(w, "akademik_id is required", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(string(p.Status)) == "" {
+		p.Status = models.Dostepny
+	}
+	if strings.TrimSpace(string(p.Standard)) == "" {
+		p.Standard = models.Standard
+	}
 
 	id, err := h.svc.Create(r.Context(), &p)
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23503" {
+			http.Error(w, "Invalid akademik_id", http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "Failed to create pokoj", http.StatusInternalServerError)
 		return
 	}
@@ -78,18 +94,19 @@ func (h *PokojeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.svc.Delete(r.Context(), id); err != nil {
 		if errors.Is(err, services.ErrNotFound) {
-			http.Error(w, "Pokój not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "pokoj nie istnieje")
 			return
 		}
-		http.Error(w, "Failed to delete pokoj", http.StatusInternalServerError)
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23503" {
+			writeError(w, http.StatusConflict, "nie mozna usunac pokoju z aktywnymi powiazaniami")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "nie udalo sie usunac pokoju")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"message": "Pokój usunięty"}); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "pokoj usuniety"})
 }
 
 func (h *PokojeHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {

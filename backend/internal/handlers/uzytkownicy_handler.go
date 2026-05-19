@@ -10,6 +10,7 @@ import (
 
 	"akademik/internal/models"
 	"akademik/internal/services"
+	"github.com/lib/pq"
 )
 
 type UzytkownicyHandler struct {
@@ -67,15 +68,33 @@ func (h *UzytkownicyHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		switch err.Error() {
+		case "name is required":
+			http.Error(w, "Name is required", http.StatusBadRequest)
+			return
 		case "invalid email":
 			http.Error(w, "Invalid email format", http.StatusBadRequest)
+			return
+		case "phone is required":
+			http.Error(w, "Phone number is required", http.StatusBadRequest)
+			return
+		case "username is required":
+			http.Error(w, "Username is required", http.StatusBadRequest)
+			return
+		case "invalid role":
+			http.Error(w, "Invalid role", http.StatusBadRequest)
 			return
 		case "email already in use":
 			http.Error(w, "Email already in use", http.StatusConflict)
 			return
 		case "password must be at least 6 characters long":
 			http.Error(w, "Password must be at least 6 characters long", http.StatusBadRequest)
+			return
 		default:
+			var pqErr *pq.Error
+			if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+				http.Error(w, "Email, telefon lub username już istnieje", http.StatusConflict)
+				return
+			}
 			http.Error(w, "Error during user creation", http.StatusInternalServerError)
 			return
 		}
@@ -126,4 +145,29 @@ func (h *UzytkownicyHandler) UpdateRole(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "rola zaktualizowana"})
+}
+
+func (h *UzytkownicyHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "nieprawidlowe id uzytkownika")
+		return
+	}
+
+	if err := h.service.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "uzytkownik nie istnieje")
+			return
+		}
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23503" {
+			writeError(w, http.StatusConflict, "nie mozna usunac uzytkownika z aktywnymi powiazaniami")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "nie udalo sie usunac uzytkownika")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "uzytkownik usuniety"})
 }

@@ -128,7 +128,7 @@ const PaymentHistory = () => {
 
     const handleTogglePaid = async (payment) => {
         const next = payment.status !== 'OPŁACONE';
-        const response = await apiFetch(`/rachunki/${payment.id}/oplacone`, {
+        const response = await apiFetch(`/rachunki/${encodeURIComponent(payment.id)}/oplacone`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ czy_oplacone: next }),

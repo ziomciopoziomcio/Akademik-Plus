@@ -21,11 +21,22 @@ func NewUzytkownicyService(repo *repository.UzytkownicyRepo) *UzytkownicyService
 }
 
 func (s *UzytkownicyService) CreateUser(u *models.Uzytkownik, plainPassword string) error {
+	if strings.TrimSpace(u.Imie) == "" || strings.TrimSpace(u.Nazwisko) == "" {
+		return errors.New("name is required")
+	}
 	if !strings.Contains(u.Email, "@") {
 		return errors.New("invalid email")
 	}
+	if strings.TrimSpace(u.NumerTelefonu) == "" {
+		return errors.New("phone is required")
+	}
+	if strings.TrimSpace(u.Username) == "" {
+		return errors.New("username is required")
+	}
 	if strings.TrimSpace(string(u.Rola)) == "" {
 		u.Rola = models.Mieszkaniec
+	} else if u.Rola != models.Administrator && u.Rola != models.Mieszkaniec {
+		return errors.New("invalid role")
 	}
 
 	existing, err := s.repo.GetByEmail(u.Email)
@@ -63,6 +74,17 @@ func (s *UzytkownicyService) UpdateRole(ctx context.Context, id int, rola models
 		return errors.New("invalid role")
 	}
 	rows, err := s.repo.UpdateRole(ctx, id, rola)
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *UzytkownicyService) Delete(ctx context.Context, id int) error {
+	rows, err := s.repo.Delete(ctx, id)
 	if err != nil {
 		return err
 	}

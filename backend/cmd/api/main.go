@@ -71,6 +71,9 @@ func main() {
 	mux.Handle("PATCH /uzytkownicy/{id}/rola", middleware.JWTMiddleware(
 		middleware.RequireRole(models.Administrator)(http.HandlerFunc(uzytkownicyHandler.UpdateRole)),
 	))
+	mux.Handle("DELETE /uzytkownicy/{id}", middleware.JWTMiddleware(
+		middleware.RequireRole(models.Administrator)(http.HandlerFunc(uzytkownicyHandler.Delete)),
+	))
 	mux.HandleFunc("POST /uzytkownicy", uzytkownicyHandler.Create)
 
 	pokojeRepo := repository.NewPokojeRepo(db)
@@ -79,6 +82,9 @@ func main() {
 
 	mux.Handle("GET /pokoje", middleware.JWTMiddleware(http.HandlerFunc(pokojeHandler.GetAll)))
 	mux.Handle("POST /pokoje", middleware.JWTMiddleware(middleware.RequireRole(models.Administrator)(http.HandlerFunc(pokojeHandler.Create))))
+	mux.Handle("DELETE /pokoje/{id}", middleware.JWTMiddleware(
+		middleware.RequireRole(models.Administrator)(http.HandlerFunc(pokojeHandler.Delete)),
+	))
 	mux.Handle("PATCH /pokoje/{id}/status", middleware.JWTMiddleware(
 		middleware.RequireRole(models.Administrator)(http.HandlerFunc(pokojeHandler.UpdateStatus)),
 	))
