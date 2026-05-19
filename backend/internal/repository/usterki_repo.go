@@ -17,27 +17,19 @@ func NewUsterkiRepo(db *sqlx.DB) *UsterkiRepo {
 }
 
 func (r *UsterkiRepo) Create(u *models.Usterka) error {
+	if u.Priorytet == nil {
+		return fmt.Errorf("priorytet zgłoszenia jest wymagany")
+	}
+
 	query := `
         INSERT INTO usterki (zglaszajacy_id, pokoj_id, opis_usterki, priorytet, status) 
-        VALUES (:zglaszajacy_id, :pokoj_id, :opis_usterki, :priorytet, :status)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id`
-	rows, err := r.db.NamedQuery(query, u)
-	if err != nil {
+
+	if err := r.db.QueryRow(query, u.ZglaszajacyID, u.PokojID, u.OpisUsterki, string(*u.Priorytet), string(u.Status)).Scan(&u.ID); err != nil {
 		return err
 	}
-	defer rows.Close()
 
-	if rows.Next() {
-		err = rows.Scan(&u.ID)
-		if err != nil {
-			return err
-		}
-	} else {
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		return fmt.Errorf("nie udało się utworzyć usterki")
-	}
 	return nil
 }
 
