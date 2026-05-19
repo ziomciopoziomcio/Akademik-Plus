@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { useNavigate } from 'react-router-dom';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     PieChart, Pie, Cell,
     BarChart, Bar,
 } from 'recharts';
 import './AdminDashboard.css';
-import { apiFetch, readJsonOrText, clearAuthToken } from '../api';
+import { apiFetch, readJsonOrText } from '../api';
+import AppHeader from './AppHeader';
 
 const COLORS = {
     free: '#1b6392',
@@ -38,18 +38,40 @@ const faultDescription = (fault) => {
     return `${room} - ${desc} (${status})`;
 };
 
-const AdminDashboard = () => {
-    const navigate = useNavigate();
+const formatDateTime = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('pl-PL');
+};
 
+const statusOptions = ['Przyjeto', 'Weryfikacja', 'W_trakcie_naprawy', 'Naprawiono', 'Zakonczono_bez_naprawy'];
+
+const AdminDashboard = () => {
     const [adminName, setAdminName] = useState('Administratorze');
     const [stats, setStats] = useState(normalizeStats());
     const [faults, setFaults] = useState([]);
     const [selectedFault, setSelectedFault] = useState(null);
+    const [faultComments, setFaultComments] = useState([]);
+    const [commentDraft, setCommentDraft] = useState('');
+    const [faultStatus, setFaultStatus] = useState('Przyjeto');
+
     const [activeModal, setActiveModal] = useState(null);
+    const [users, setUsers] = useState([]);
+    const [rooms, setRooms] = useState([]);
+    const [accommodations, setAccommodations] = useState([]);
+    const [userRoleDraft, setUserRoleDraft] = useState({});
+    const [roomStatusDraft, setRoomStatusDraft] = useState({});
+    const [accommodationForm, setAccommodationForm] = useState({
+        mieszkaniec_id: '',
+        pokoj_id: '',
+        poczatek_zakwaterowania: '',
+        koniec_zakwaterowania: '',
+    });
+    const [checkoutForm, setCheckoutForm] = useState({ id: '', koniec_zakwaterowania: '' });
 
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [statusToSet, setStatusToSet] = useState('Naprawiono');
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -82,6 +104,47 @@ const AdminDashboard = () => {
         ];
     }, [stats]);
 
+    const loadFaultComments = async (faultId) => {
+        const response = await apiFetch(`/komentarze/usterka/${faultId}`);
+        if (!response.ok) {
+            setFaultComments([]);
+            return;
+        }
+        const data = await readJsonOrText(response);
+        setFaultComments(Array.isArray(data) ? data : data?.items || []);
+    };
+
+    const openFaultDetails = async (fault) => {
+        setSelectedFault(fault);
+        setFaultStatus(fault.status || 'Przyjeto');
+        setCommentDraft('');
+        await loadFaultComments(fault.id);
+    };
+
+    const loadMainData = async () => {
+        const [statsRes, faultsRes] = await Promise.all([
+            apiFetch('/statystyki'),
+            apiFetch('/usterki'),
+        ]);
+
+        if (!statsRes.ok) {
+            const body = await readJsonOrText(statsRes);
+            throw new Error(typeof body === 'string' ? body : body?.error || 'Nie udało się pobrać statystyk.');
+        }
+        const statsData = await readJsonOrText(statsRes);
+        setStats(normalizeStats(statsData));
+
+        if (faultsRes.ok) {
+            const faultsData = await readJsonOrText(faultsRes);
+            setFaults(Array.isArray(faultsData) ? faultsData : faultsData?.items || []);
+        } else if (faultsRes.status === 404) {
+            setFaults([]);
+        } else {
+            const body = await readJsonOrText(faultsRes);
+            throw new Error(typeof body === 'string' ? body : body?.error || 'Nie udało się pobrać usterek.');
+        }
+    };
+
     useEffect(() => {
         let mounted = true;
 
@@ -89,29 +152,7 @@ const AdminDashboard = () => {
             setLoading(true);
             setError('');
             try {
-                const [statsRes, faultsRes] = await Promise.all([
-                    apiFetch('/statystyki'),
-                    apiFetch('/usterki'),
-                ]);
-
-                if (!statsRes.ok) {
-                    const body = await readJsonOrText(statsRes);
-                    throw new Error(typeof body === 'string' ? body : body?.error || 'Nie udało się pobrać statystyk.');
-                }
-                const statsData = await readJsonOrText(statsRes);
-                if (mounted) setStats(normalizeStats(statsData));
-
-                if (faultsRes.ok) {
-                    const faultsData = await readJsonOrText(faultsRes);
-                    const items = Array.isArray(faultsData) ? faultsData : faultsData?.items || [];
-                    if (mounted) setFaults(items);
-                } else if (faultsRes.status === 404) {
-                    if (mounted) setFaults([]);
-                } else {
-                    const body = await readJsonOrText(faultsRes);
-                    throw new Error(typeof body === 'string' ? body : body?.error || 'Nie udało się pobrać usterek.');
-                }
-
+                await loadMainData();
                 const role = sessionStorage.getItem('userRole') || '';
                 if (mounted && role) {
                     setAdminName(role);
@@ -130,37 +171,145 @@ const AdminDashboard = () => {
         };
     }, []);
 
-    const closeModal = () => setActiveModal(null);
+    const loadUsers = async () => {
+        const response = await apiFetch('/uzytkownicy');
+        if (!response.ok) throw new Error('Nie udało się pobrać użytkowników.');
+        const data = await readJsonOrText(response);
+        const items = Array.isArray(data) ? data : data?.items || [];
+        setUsers(items);
+        setUserRoleDraft(Object.fromEntries(items.map((user) => [user.id, user.rola || 'Mieszkaniec'])));
+    };
 
-    const handleResolveFault = async (e) => {
-        e.preventDefault();
-        if (!selectedFault) {
-            alert('Wybierz usterkę z listy.');
-            return;
-        }
+    const loadRooms = async () => {
+        const response = await apiFetch('/pokoje');
+        if (!response.ok) throw new Error('Nie udało się pobrać pokoi.');
+        const data = await readJsonOrText(response);
+        const items = Array.isArray(data) ? data : data?.items || [];
+        setRooms(items);
+        setRoomStatusDraft(Object.fromEntries(items.map((room) => [room.id, room.status_pokoju || 'Dostepny'])));
+    };
+
+    const loadAccommodations = async () => {
+        const response = await apiFetch('/zakwaterowania');
+        if (!response.ok) throw new Error('Nie udało się pobrać zakwaterowań.');
+        const data = await readJsonOrText(response);
+        setAccommodations(Array.isArray(data) ? data : data?.items || []);
+    };
+
+    const openQuickActionModal = async (modal) => {
         try {
-            const response = await apiFetch(`/usterki/${selectedFault}/status`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: statusToSet }),
-            });
-
-            if (!response.ok) {
-                const body = await readJsonOrText(response);
-                alert(typeof body === 'string' ? body : body?.error || 'Nie udało się zaktualizować statusu usterki.');
-                return;
-            }
-
-            setFaults((prev) => prev.map((fault) => (
-                fault.id === selectedFault ? { ...fault, status: statusToSet } : fault
-            )));
-            closeModal();
-            alert('Status usterki został zaktualizowany.');
+            if (modal === 'users') await loadUsers();
+            if (modal === 'rooms') await loadRooms();
+            if (modal === 'accommodations') await loadAccommodations();
+            setActiveModal(modal);
         } catch (err) {
-            console.error('Resolve fault error:', err);
-            alert(err.message || 'Nie udało się zaktualizować statusu usterki.');
+            alert(err.message || 'Nie udało się pobrać danych dla akcji administracyjnej.');
         }
     };
+
+    const handleFaultStatusUpdate = async () => {
+        if (!selectedFault) return;
+        const response = await apiFetch(`/usterki/${selectedFault.id}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: faultStatus }),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się zaktualizować statusu usterki.');
+            return;
+        }
+
+        setFaults((prev) => prev.map((fault) => (fault.id === selectedFault.id ? { ...fault, status: faultStatus } : fault)));
+        setSelectedFault((prev) => (prev ? { ...prev, status: faultStatus } : prev));
+    };
+
+    const handleFaultCommentSubmit = async (e) => {
+        e.preventDefault();
+        if (!selectedFault || !commentDraft.trim()) {
+            alert('Wpisz treść komentarza.');
+            return;
+        }
+        const response = await apiFetch(`/komentarze/usterka/${selectedFault.id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tresc: commentDraft.trim() }),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się dodać komentarza.');
+            return;
+        }
+        setCommentDraft('');
+        await loadFaultComments(selectedFault.id);
+    };
+
+    const handleUpdateUserRole = async (userId) => {
+        const response = await apiFetch(`/uzytkownicy/${userId}/rola`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rola: userRoleDraft[userId] }),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się zaktualizować roli.');
+            return;
+        }
+        setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, rola: userRoleDraft[userId] } : user)));
+    };
+
+    const handleUpdateRoomStatus = async (roomId) => {
+        const response = await apiFetch(`/pokoje/${roomId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status_pokoju: roomStatusDraft[roomId] }),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się zaktualizować statusu pokoju.');
+            return;
+        }
+        setRooms((prev) => prev.map((room) => (room.id === roomId ? { ...room, status_pokoju: roomStatusDraft[roomId] } : room)));
+    };
+
+    const handleCreateAccommodation = async (e) => {
+        e.preventDefault();
+        const response = await apiFetch('/zakwaterowania', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mieszkaniec_id: Number(accommodationForm.mieszkaniec_id),
+                pokoj_id: Number(accommodationForm.pokoj_id),
+                poczatek_zakwaterowania: accommodationForm.poczatek_zakwaterowania,
+                koniec_zakwaterowania: accommodationForm.koniec_zakwaterowania,
+            }),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się przypisać zakwaterowania.');
+            return;
+        }
+        await loadAccommodations();
+        setAccommodationForm({ mieszkaniec_id: '', pokoj_id: '', poczatek_zakwaterowania: '', koniec_zakwaterowania: '' });
+    };
+
+    const handleCheckout = async (e) => {
+        e.preventDefault();
+        const response = await apiFetch(`/zakwaterowania/${checkoutForm.id}/checkout`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ koniec_zakwaterowania: checkoutForm.koniec_zakwaterowania }),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się zapisać wymeldowania.');
+            return;
+        }
+        await loadAccommodations();
+        setCheckoutForm({ id: '', koniec_zakwaterowania: '' });
+    };
+
+    const closeModal = () => setActiveModal(null);
 
     const handleGenerateReportPdf = () => {
         if (!startDate || !endDate) {
@@ -189,22 +338,9 @@ const AdminDashboard = () => {
         pdf.save(`Raport_${startDate}_${endDate}.pdf`);
     };
 
-    const handleLogout = () => {
-        clearAuthToken();
-        sessionStorage.removeItem('userRole');
-        navigate('/');
-    };
-
     return (
         <div className="admin-wrapper">
-            <header className="admin-header">
-                <h1 className="logo-text">Akademik+</h1>
-                <h2 className="welcome-text">Witaj, {adminName}!</h2>
-                <div className="header-actions">
-                    <button className="secondary-btn" onClick={() => navigate('/history')}>Historia płatności</button>
-                    <button className="secondary-btn" onClick={handleLogout}>Wyloguj</button>
-                </div>
-            </header>
+            <AppHeader role="Administrator" greeting={`Witaj, ${adminName}!`} />
 
             {error && <div className="error-message" role="alert">{error}</div>}
             {loading && <div className="loading-message">Ładowanie danych z API...</div>}
@@ -251,16 +387,15 @@ const AdminDashboard = () => {
                         {faults.length ? faults.map((fault) => (
                             <div
                                 key={fault.id}
-                                className={`fault-item ${selectedFault === fault.id ? 'selected' : ''}`}
-                                onClick={() => setSelectedFault(fault.id)}
+                                className="fault-item"
+                                onDoubleClick={() => openFaultDetails(fault)}
+                                title="Kliknij dwa razy, aby otworzyć szczegóły i czat"
                             >
                                 {faultDescription(fault)}
                             </div>
                         )) : <div>Brak usterek.</div>}
                     </div>
-                    <button className="primary-btn mt-auto" onClick={() => setActiveModal('resolveFault')}>
-                        Zmień status usterki
-                    </button>
+                    <div className="fault-hint">Dwuklik otwiera szczegóły i czat usterki.</div>
                 </div>
 
                 <div className="admin-card bar-chart-card">
@@ -283,7 +418,9 @@ const AdminDashboard = () => {
                 <div className="admin-card actions-card">
                     <h3 className="card-title">Szybkie akcje</h3>
                     <div className="action-buttons">
-                        <button className="primary-btn" onClick={() => setActiveModal('resolveFault')}>Zmień status usterki</button>
+                        <button className="primary-btn" onClick={() => openQuickActionModal('accommodations')}>Zarządzaj zakwaterowaniami</button>
+                        <button className="primary-btn" onClick={() => openQuickActionModal('users')}>Zarządzaj użytkownikami</button>
+                        <button className="primary-btn" onClick={() => openQuickActionModal('rooms')}>Zarządzaj pokojami</button>
                     </div>
                 </div>
 
@@ -303,27 +440,154 @@ const AdminDashboard = () => {
                 </div>
             </div>
 
-            {activeModal === 'resolveFault' && (
-                <div className="admin-modal-overlay">
-                    <div className="admin-modal-content">
-                        <form onSubmit={handleResolveFault}>
-                            <h2>Zmiana statusu usterki</h2>
-                            <p><strong>Wybrana usterka:</strong> {selectedFault ? faultDescription(faults.find((f) => f.id === selectedFault) || {}) : 'Brak wyboru'}</p>
-                            <div className="form-group">
-                                <label>Nowy status:</label>
-                                <select value={statusToSet} onChange={(e) => setStatusToSet(e.target.value)}>
-                                    <option value="Przyjeto">Przyjęto</option>
-                                    <option value="Weryfikacja">Weryfikacja</option>
-                                    <option value="W_trakcie_naprawy">W trakcie naprawy</option>
-                                    <option value="Naprawiono">Naprawiono</option>
-                                    <option value="Zakonczono_bez_naprawy">Zakończono bez naprawy</option>
-                                </select>
-                            </div>
+            {selectedFault && (
+                <div className="admin-modal-overlay" onClick={() => setSelectedFault(null)}>
+                    <div className="admin-modal-content fault-modal-content" onClick={(e) => e.stopPropagation()}>
+                        <h2>Usterka #{selectedFault.id}</h2>
+                        <p><strong>Pokój:</strong> {selectedFault.pokoj_id}</p>
+                        <p><strong>Opis:</strong> {selectedFault.opis_usterki}</p>
+                        <p><strong>Priorytet:</strong> {selectedFault.priorytet || '-'}</p>
+                        <p><strong>Data zgłoszenia:</strong> {formatDateTime(selectedFault.data_zgloszenia)}</p>
+                        <div className="form-group">
+                            <label>Status:</label>
+                            <select value={faultStatus} onChange={(e) => setFaultStatus(e.target.value)}>
+                                {statusOptions.map((status) => (
+                                    <option key={status} value={status}>{status}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <button className="primary-btn" onClick={handleFaultStatusUpdate}>Zapisz status</button>
+
+                        <h3 className="chat-title">Czat usterki</h3>
+                        <div className="fault-chat-timeline">
+                            {!faultComments.length ? <div>Brak komentarzy.</div> : null}
+                            {faultComments.map((comment) => {
+                                const isAdmin = (comment.autor_rola || '').toLowerCase().includes('admin');
+                                return (
+                                    <div key={comment.id} className={`chat-message ${isAdmin ? 'admin' : 'resident'}`}>
+                                        <div className="chat-meta">
+                                            <strong>{comment.autor_nazwa || `Użytkownik ${comment.autor_id}`}</strong>
+                                            <span>{formatDateTime(comment.data_dodania)}</span>
+                                        </div>
+                                        <div>{comment.tresc}</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        <form className="chat-form" onSubmit={handleFaultCommentSubmit}>
+                            <textarea
+                                rows="3"
+                                value={commentDraft}
+                                onChange={(e) => setCommentDraft(e.target.value)}
+                                placeholder="Napisz wiadomość..."
+                            />
                             <div className="modal-buttons">
-                                <button type="button" className="cancel-btn" onClick={closeModal}>Anuluj</button>
-                                <button type="submit" className="confirm-btn">Zapisz</button>
+                                <button type="button" className="cancel-btn" onClick={() => setSelectedFault(null)}>Zamknij</button>
+                                <button type="submit" className="confirm-btn">Wyślij</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {activeModal === 'users' && (
+                <div className="admin-modal-overlay" onClick={closeModal}>
+                    <div className="admin-modal-content" onClick={(e) => e.stopPropagation()}>
+                        <h2>Zarządzanie użytkownikami</h2>
+                        <div className="table-like-list">
+                            {users.map((user) => (
+                                <div className="list-row" key={user.id}>
+                                    <div>
+                                        <strong>{user.imie} {user.nazwisko}</strong><br />
+                                        <span>{user.email}</span>
+                                    </div>
+                                    <div className="row-actions">
+                                        <select
+                                            value={userRoleDraft[user.id] || user.rola || 'Mieszkaniec'}
+                                            onChange={(e) => setUserRoleDraft((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                                        >
+                                            <option value="Mieszkaniec">Mieszkaniec</option>
+                                            <option value="Administrator">Administrator</option>
+                                        </select>
+                                        <button className="confirm-btn" onClick={() => handleUpdateUserRole(user.id)}>Zapisz rolę</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="modal-buttons">
+                            <button type="button" className="cancel-btn" onClick={closeModal}>Zamknij</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {activeModal === 'rooms' && (
+                <div className="admin-modal-overlay" onClick={closeModal}>
+                    <div className="admin-modal-content" onClick={(e) => e.stopPropagation()}>
+                        <h2>Zarządzanie pokojami</h2>
+                        <div className="table-like-list">
+                            {rooms.map((room) => (
+                                <div className="list-row" key={room.id}>
+                                    <div>
+                                        <strong>Pokój {room.numer_pokoju}</strong><br />
+                                        <span>Status: {room.status_pokoju}</span>
+                                    </div>
+                                    <div className="row-actions">
+                                        <select
+                                            value={roomStatusDraft[room.id] || room.status_pokoju || 'Dostepny'}
+                                            onChange={(e) => setRoomStatusDraft((prev) => ({ ...prev, [room.id]: e.target.value }))}
+                                        >
+                                            <option value="Dostepny">Dostepny</option>
+                                            <option value="W_remoncie">W_remoncie</option>
+                                        </select>
+                                        <button className="confirm-btn" onClick={() => handleUpdateRoomStatus(room.id)}>Zapisz status</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="modal-buttons">
+                            <button type="button" className="cancel-btn" onClick={closeModal}>Zamknij</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {activeModal === 'accommodations' && (
+                <div className="admin-modal-overlay" onClick={closeModal}>
+                    <div className="admin-modal-content" onClick={(e) => e.stopPropagation()}>
+                        <h2>Zarządzanie zakwaterowaniami</h2>
+                        <form onSubmit={handleCreateAccommodation} className="modal-form-grid">
+                            <input type="number" placeholder="ID mieszkańca" value={accommodationForm.mieszkaniec_id} onChange={(e) => setAccommodationForm((prev) => ({ ...prev, mieszkaniec_id: e.target.value }))} />
+                            <input type="number" placeholder="ID pokoju" value={accommodationForm.pokoj_id} onChange={(e) => setAccommodationForm((prev) => ({ ...prev, pokoj_id: e.target.value }))} />
+                            <input type="date" value={accommodationForm.poczatek_zakwaterowania} onChange={(e) => setAccommodationForm((prev) => ({ ...prev, poczatek_zakwaterowania: e.target.value }))} />
+                            <input type="date" value={accommodationForm.koniec_zakwaterowania} onChange={(e) => setAccommodationForm((prev) => ({ ...prev, koniec_zakwaterowania: e.target.value }))} />
+                            <button className="confirm-btn" type="submit">Przypisz mieszkańca do pokoju</button>
+                        </form>
+
+                        <form onSubmit={handleCheckout} className="modal-form-grid checkout-form">
+                            <input type="number" placeholder="ID zakwaterowania" value={checkoutForm.id} onChange={(e) => setCheckoutForm((prev) => ({ ...prev, id: e.target.value }))} />
+                            <input type="date" value={checkoutForm.koniec_zakwaterowania} onChange={(e) => setCheckoutForm((prev) => ({ ...prev, koniec_zakwaterowania: e.target.value }))} />
+                            <button className="confirm-btn" type="submit">Wymelduj</button>
+                        </form>
+
+                        <div className="table-like-list">
+                            {accommodations.map((item) => (
+                                <div className="list-row" key={item.id}>
+                                    <div>
+                                        <strong>#{item.id} • Pokój {item.numer_pokoju || item.pokoj_id}</strong><br />
+                                        <span>{item.mieszkaniec_nazwa || `Mieszkaniec ${item.mieszkaniec_id}`}</span>
+                                    </div>
+                                    <div>
+                                        {item.poczatek_zakwaterowania} - {item.koniec_zakwaterowania}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="modal-buttons">
+                            <button type="button" className="cancel-btn" onClick={closeModal}>Zamknij</button>
+                        </div>
                     </div>
                 </div>
             )}

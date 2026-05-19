@@ -1,16 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { useNavigate } from 'react-router-dom';
 import './PaymentHistory.css';
-import { apiFetch, readJsonOrText, clearAuthToken } from '../api';
+import { apiFetch, readJsonOrText } from '../api';
+import AppHeader from './AppHeader';
 
 const removePolishChars = (text) => {
     if (!text) return '';
     const charMap = {
         'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
-        'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z'
+        'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z',
     };
-    return text.replace(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, match => charMap[match]);
+    return text.replace(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, (match) => charMap[match]);
 };
 
 const mapPayment = (payment) => ({
@@ -18,11 +18,17 @@ const mapPayment = (payment) => ({
     date: payment.data_wystawienia || payment.data || payment.date || '',
     desc: payment.okres_rozliczeniowy || payment.opis || payment.desc || '',
     amount: Number(payment.kwota ?? payment.amount ?? 0),
-    status: (payment.czy_oplacone === true || payment.oplacone === true || payment.status === 'OPŁACONE' ? 'OPŁACONE' : payment.status || 'NIEOPŁACONE').toString().toUpperCase(),
+    status: payment.czy_oplacone === true || payment.oplacone === true || payment.status === 'OPŁACONE' ? 'OPŁACONE' : 'NIEOPŁACONE',
 });
 
+const formatDate = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleDateString('pl-PL');
+};
+
 const PaymentHistory = () => {
-    const navigate = useNavigate();
     const [payments, setPayments] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -30,32 +36,30 @@ const PaymentHistory = () => {
     const [error, setError] = useState('');
     const [emptyMessage, setEmptyMessage] = useState('');
 
+    const role = useMemo(() => (sessionStorage.getItem('userRole') || '').toLowerCase(), []);
+    const isAdmin = role.includes('admin');
+
     useEffect(() => {
         let mounted = true;
-
-        const loadPayments = async () => {
-            setLoading(true);
-            setError('');
-            setEmptyMessage('');
-
+        const load = async () => {
             try {
-                const response = await apiFetch('/rachunki/moje');
+                const endpoint = isAdmin ? '/rachunki' : '/rachunki/moje';
+                const response = await apiFetch(endpoint);
+                if (!mounted) return;
                 if (response.ok) {
                     const data = await readJsonOrText(response);
                     const items = Array.isArray(data) ? data : data?.rachunki || data?.items || [];
-                    if (mounted) {
-                        setPayments(items.map(mapPayment));
-                        if (!items.length) setEmptyMessage('Brak aktywnych rachunków.');
-                    }
+                    setPayments(items.map(mapPayment));
+                    setEmptyMessage(items.length ? '' : 'Brak aktywnych rachunków.');
+                    setError('');
                 } else if (response.status === 404) {
-                    if (mounted) {
-                        setPayments([]);
-                        setEmptyMessage('Brak aktywnych rachunków.');
-                    }
+                    setPayments([]);
+                    setEmptyMessage('Brak aktywnych rachunków.');
+                    setError('');
                 } else if (response.status === 401 || response.status === 403) {
-                    if (mounted) setError('Brak dostępu do historii płatności. Zaloguj się ponownie lub sprawdź uprawnienia.');
+                    setError('Brak dostępu do historii płatności. Zaloguj się ponownie lub sprawdź uprawnienia.');
                 } else {
-                    if (mounted) setError('Nie udało się pobrać historii płatności.');
+                    setError('Nie udało się pobrać historii płatności.');
                 }
             } catch (err) {
                 console.error('Payment history load error:', err);
@@ -64,19 +68,17 @@ const PaymentHistory = () => {
                 if (mounted) setLoading(false);
             }
         };
-
-        loadPayments();
+        load();
         return () => {
             mounted = false;
         };
-    }, []);
+    }, [isAdmin]);
 
     const handleGeneratePdf = (id) => {
-        const payment = payments.find(p => p.id === id);
+        const payment = payments.find((p) => p.id === id);
         if (!payment) return;
 
         const pdf = new jsPDF();
-
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(22);
         pdf.text('Potwierdzenie platnosci', 20, 20);
@@ -94,7 +96,7 @@ const PaymentHistory = () => {
         pdf.setFontSize(12);
 
         pdf.text(`Numer transakcji: #TXN-${payment.id}-AKD`, 20, 50);
-        pdf.text(`Data wystawienia: ${payment.date}`, 20, 60);
+        pdf.text(`Data wystawienia: ${formatDate(payment.date)}`, 20, 60);
         pdf.text(`Tytulem: ${removePolishChars(payment.desc)}`, 20, 70);
 
         pdf.setFont('helvetica', 'bold');
@@ -121,30 +123,35 @@ const PaymentHistory = () => {
             setIsProcessing(false);
             setIsModalOpen(false);
             alert('Płatności są obsługiwane przez administrację.');
-        }, 1500);
+        }, 1000);
     };
 
-    const handleLogout = () => {
-        clearAuthToken();
-        sessionStorage.removeItem('userRole');
-        navigate('/');
+    const handleTogglePaid = async (payment) => {
+        const next = payment.status !== 'OPŁACONE';
+        const response = await apiFetch(`/rachunki/${payment.id}/oplacone`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ czy_oplacone: next }),
+        });
+        if (!response.ok) {
+            const body = await readJsonOrText(response);
+            alert(typeof body === 'string' ? body : body?.error || 'Nie udało się zaktualizować rachunku.');
+            return;
+        }
+        setPayments((prev) => prev.map((item) => (
+            item.id === payment.id ? { ...item, status: next ? 'OPŁACONE' : 'NIEOPŁACONE' } : item
+        )));
     };
 
     return (
         <div className="payment-page-wrapper">
-            <header className="payment-header">
-                <h1 className="payment-logo-text">Akademik+</h1>
-                <div className="header-actions">
-                    <button className="secondary-btn" onClick={() => navigate('/dashboard')}>Powrót do panelu</button>
-                    <button className="secondary-btn" onClick={handleLogout}>Wyloguj</button>
-                </div>
-            </header>
+            <AppHeader role={isAdmin ? 'Administrator' : 'Mieszkaniec'} greeting={isAdmin ? 'Panel rozliczeń administratora' : undefined} />
 
             {error && <div className="error-message" role="alert">{error}</div>}
             {loading && <div className="loading-message">Ładowanie rachunków z API...</div>}
 
             <div className="payment-expanded-card">
-                <h2 className="payment-card-title">Historia opłat</h2>
+                <h2 className="payment-card-title">{isAdmin ? 'Globalna historia rachunków' : 'Historia opłat'}</h2>
 
                 <div className="payment-table-wrapper">
                     <table className="payment-full-table">
@@ -154,13 +161,13 @@ const PaymentHistory = () => {
                             <th>Opis płatności</th>
                             <th>Kwota</th>
                             <th>Status</th>
-                            <th>Rachunek</th>
+                            <th>{isAdmin ? 'Kontrola' : 'Rachunek'}</th>
                         </tr>
                         </thead>
                         <tbody>
                         {payments.length ? payments.map((payment) => (
                             <tr key={payment.id}>
-                                <td className="col-date">{payment.date}</td>
+                                <td className="col-date">{formatDate(payment.date)}</td>
                                 <td className="col-desc">{payment.desc}</td>
                                 <td className="col-amount">{payment.amount} zł</td>
                                 <td className="col-status">
@@ -169,9 +176,15 @@ const PaymentHistory = () => {
                                     </span>
                                 </td>
                                 <td className="col-action">
-                                    <button className="pdf-btn" onClick={() => handleGeneratePdf(payment.id)}>
-                                        Wygeneruj rachunek PDF
-                                    </button>
+                                    {isAdmin ? (
+                                        <button className="pdf-btn" onClick={() => handleTogglePaid(payment)}>
+                                            Oznacz jako {payment.status === 'OPŁACONE' ? 'NIEOPŁACONE' : 'OPŁACONE'}
+                                        </button>
+                                    ) : (
+                                        <button className="pdf-btn" onClick={() => handleGeneratePdf(payment.id)}>
+                                            Wygeneruj rachunek PDF
+                                        </button>
+                                    )}
                                 </td>
                             </tr>
                         )) : (
@@ -183,9 +196,11 @@ const PaymentHistory = () => {
                     </table>
                 </div>
 
-                <button className="payment-main-btn" onClick={handleOpenPaymentModal}>
-                    Dokonaj płatności
-                </button>
+                {!isAdmin ? (
+                    <button className="payment-main-btn" onClick={handleOpenPaymentModal}>
+                        Dokonaj płatności
+                    </button>
+                ) : null}
             </div>
 
             {isModalOpen && (

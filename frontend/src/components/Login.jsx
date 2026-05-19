@@ -111,7 +111,7 @@ const Login = () => {
                     </button>
                 </form>
 
-                <button type="button" className="reset-btn" onClick={() => navigate('/') }>
+                <button type="button" className="reset-btn" onClick={() => navigate('/login') }>
                     Zresetuj hasło
                 </button>
             </div>
@@ -120,4 +120,3 @@ const Login = () => {
 };
 
 export default Login;
-

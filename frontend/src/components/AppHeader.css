@@ -1,0 +1,61 @@
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 10px;
+}
+
+.app-header-brand {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.app-logo-text {
+    color: #1b0a5a;
+    font-size: 36px;
+    font-weight: 800;
+    margin: 0;
+}
+
+.app-welcome-text {
+    color: #1b0a5a;
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.app-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.secondary-btn {
+    background-color: #ffffff;
+    color: #1b0a5a;
+    border: 1px solid #1b0a5a;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.secondary-btn.active {
+    background-color: #1b0a5a;
+    color: #ffffff;
+}
+
+@media (max-width: 900px) {
+    .app-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .app-header-actions {
+        justify-content: flex-start;
+    }
+}
